@@ -1,13 +1,13 @@
 // ULTRADROID Models API - GLB 2.0 loader
-// Target: Unity 2021.3 / BepInEx IL2CPP
-// DIAGNOSTIC BUILD: JSON deserialization DISABLED
-// Purpose: isolate whether the crash is caused by deserialization
+// Target: Unity 2021.3 / BepInEx IL2CPP (Android)
+// Version with safer Newtonsoft.Json deserialization
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
+using Newtonsoft.Json;
 
 namespace ULTRADROID.Models
 {
@@ -23,7 +23,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.0-diagnostic";
+        public const string Version = "0.1.1-safer-json";
 
         private static void Log(string message)
         {
@@ -1024,24 +1024,82 @@ namespace ULTRADROID.Models
                 jsonText.Length);
 
             // ============================================================
-            // MINIMAL DIAGNOSTIC TEST – NO DESERIALIZATION
+            // SAFER NEWTONSOFT DESERIALIZATION
             // ============================================================
-            Debug.Log("[ULTRADROID Models] TEST 1: before JSON parsing");
+            Debug.Log("[ULTRADROID Models] Parse: calling Newtonsoft.Json (safer settings)");
 
-            string jsonTextCopy = jsonText;
+            GltfRoot root;
+
+            try
+            {
+                var settings = new JsonSerializerSettings
+                {
+                    // Reduce reflection / type resolution pressure on IL2CPP
+                    TypeNameHandling = TypeNameHandling.None,
+                    MetadataPropertyHandling = MetadataPropertyHandling.Ignore,
+                    MissingMemberHandling = MissingMemberHandling.Ignore,
+                    NullValueHandling = NullValueHandling.Ignore,
+                    DefaultValueHandling = DefaultValueHandling.Populate,
+                    // Avoid some heavy converters
+                    FloatParseHandling = FloatParseHandling.Double,
+                    DateParseHandling = DateParseHandling.None
+                };
+
+                root = JsonConvert.DeserializeObject<GltfRoot>(jsonText, settings);
+
+                Debug.Log("[ULTRADROID Models] Parse: Newtonsoft.Json returned");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[ULTRADROID Models] Newtonsoft JSON parsing failed:\n" + ex);
+                throw new InvalidDataException(
+                    "Failed to deserialize the GLB JSON chunk.", ex);
+            }
+
+            if (root == null)
+            {
+                throw new InvalidDataException(
+                    "GLB JSON deserialization returned null.");
+            }
+            // ============================================================
+
+            if (root.asset == null ||
+                string.IsNullOrEmpty(root.asset.version))
+            {
+                throw new InvalidDataException(
+                    "GLB JSON is missing asset.version.");
+            }
+
+            if (!root.asset.version.StartsWith("2"))
+                throw new InvalidDataException(
+                    "Only glTF 2.x files are supported.");
+
+            if (root.accessors == null)
+                throw new InvalidDataException(
+                    "GLB JSON accessors were not deserialized.");
+
+            if (root.bufferViews == null)
+                throw new InvalidDataException(
+                    "GLB JSON bufferViews were not deserialized.");
+
+            if (root.nodes == null)
+                throw new InvalidDataException(
+                    "GLB JSON nodes were not deserialized.");
 
             Debug.Log(
-                "[ULTRADROID Models] TEST 2: JSON copied; chars=" +
-                jsonTextCopy.Length);
-            // ============================================================
+                "[ULTRADROID Models] Parse: validation complete; " +
+                "nodes=" + root.nodes.Length +
+                ", meshes=" + (root.meshes == null ? 0 : root.meshes.Length) +
+                ", accessors=" + root.accessors.Length +
+                ", bufferViews=" + root.bufferViews.Length +
+                ", binaryBytes=" + (binBytes == null ? 0 : binBytes.Length));
 
-            // Intentionally stop here.
-            // If you see the TEST lines and then this exception,
-            // the crash is NOT caused by JsonUtility / Newtonsoft.
-            throw new InvalidOperationException(
-                "DIAGNOSTIC STOP: JSON deserialization intentionally disabled. " +
-                "If you reached this message the crash is NOT caused by " +
-                "JsonUtility or Newtonsoft.Json themselves.");
+            return new GlbDocument
+            {
+                json = root,
+                binary = binBytes ?? new byte[0]
+            };
         }
 
         internal byte[] ReadBufferView(int index)
