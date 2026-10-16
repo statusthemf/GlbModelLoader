@@ -24,7 +24,6 @@ jobs:
             Il2Cppmscorlib.dll
             Il2CppInterop.Runtime.dll
             UnityEngine.CoreModule.dll
-            UnityEngine.SceneManagementModule.dll
             UnityEngine.JSONSerializeModule.dll
             UnityEngine.ImageConversionModule.dll
             UnityEngine.PhysicsModule.dll
