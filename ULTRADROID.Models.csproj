@@ -25,6 +25,11 @@
       <HintPath>Assembly-CSharp.dll</HintPath>
     </Reference>
 
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
     <Reference Include="UnityEngine.JSONSerializeModule">
       <HintPath>UnityEngine.JSONSerializeModule.dll</HintPath>
     </Reference>
