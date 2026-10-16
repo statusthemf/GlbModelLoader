@@ -12,7 +12,7 @@ using ULTRADROID.Models;
 [BepInPlugin(
     "com.statusthemf.ultradroid.bladesofchaos",
     "ULTRADROID Blades of Chaos",
-    "0.3.1"
+    "0.4.0"
 )]
 [BepInDependency(
     "com.statusthemf.ultradroid.models",
@@ -26,35 +26,36 @@ public sealed class BladesOfChaosPlugin : BasePlugin
     {
         DiagLog = Log;
 
-        Log.LogInfo("[BLADE DIAG 0.3.1] Plugin starting.");
-        Log.LogInfo("[BLADE DIAG] Plugin path: " + Paths.PluginPath);
+        Log.LogInfo("[BLADE DEBUG 0.4.0] Plugin starting.");
+        Log.LogInfo("[BLADE DEBUG] Plugin directory: " + Paths.PluginPath);
 
         try
         {
             ClassInjector.RegisterTypeInIl2Cpp<BladesOfChaosDiagnosticRunner>();
-            Log.LogInfo("[BLADE DIAG] Diagnostic runner type registered.");
+            Log.LogInfo("[BLADE DEBUG] Runner type registered.");
 
             GameObject runnerObject =
-                new GameObject("ULTRADROID_BladesOfChaos_DiagnosticRunner");
+                new GameObject("ULTRADROID_BladesOfChaos_DebugRunner");
 
             UnityEngine.Object.DontDestroyOnLoad(runnerObject);
-
             runnerObject.AddComponent<BladesOfChaosDiagnosticRunner>();
 
-            Log.LogInfo("[BLADE DIAG] Runner created.");
+            Log.LogInfo("[BLADE DEBUG] Runner component attached.");
 
-            Scene current = SceneManager.GetActiveScene();
+            Scene scene = SceneManager.GetActiveScene();
 
             Log.LogInfo(
-                "[BLADE DIAG] Startup scene: " +
-                current.name +
+                "[BLADE DEBUG] Initial scene: '" +
+                scene.name +
+                "', buildIndex=" +
+                scene.buildIndex +
                 ", loaded=" +
-                current.isLoaded
+                scene.isLoaded
             );
         }
         catch (Exception ex)
         {
-            Log.LogError("[BLADE DIAG] Failed to create runner:");
+            Log.LogError("[BLADE DEBUG] Plugin initialization failed:");
             Log.LogError(ex.ToString());
         }
     }
@@ -62,9 +63,13 @@ public sealed class BladesOfChaosPlugin : BasePlugin
 
 public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
 {
-    private float nextLog;
-    private float nextAttempt;
-    private bool spawned;
+    private float nextSceneCheck;
+    private float nextStatusLog;
+    private float loadAtTime = -1f;
+
+    private string lastSceneName = null;
+    private bool attemptedInCurrentScene;
+    private bool modelLoaded;
     private int updateCount;
 
     public BladesOfChaosDiagnosticRunner(IntPtr ptr) : base(ptr)
@@ -77,60 +82,193 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
         ClassInjector.DerivedConstructorBody(this);
     }
 
+    private void OnEnable()
+    {
+        Log("[BLADE DEBUG] Runner OnEnable called.");
+    }
+
+    private void Start()
+    {
+        Log("[BLADE DEBUG] Runner Start called.");
+        CheckScene(true);
+    }
+
     private void Update()
     {
         updateCount++;
 
-        if (Time.unscaledTime >= nextLog)
+        if (Time.unscaledTime >= nextStatusLog)
         {
-            nextLog = Time.unscaledTime + 5f;
+            nextStatusLog = Time.unscaledTime + 5f;
 
-            Scene scene = SceneManager.GetActiveScene();
-            Camera camera = Camera.main;
+            Scene current = SceneManager.GetActiveScene();
 
-            if (camera == null)
-            {
-                camera = UnityEngine.Object.FindObjectOfType<Camera>();
-            }
-
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] UPDATE WORKS. Count=" +
+            Log(
+                "[BLADE DEBUG] Heartbeat. Updates=" +
                 updateCount +
-                ", scene=" +
-                scene.name +
+                ", scene='" +
+                current.name +
+                "', buildIndex=" +
+                current.buildIndex +
                 ", loaded=" +
-                scene.isLoaded +
-                ", camera=" +
-                (camera != null ? camera.name : "NULL")
+                current.isLoaded
             );
         }
 
-        if (!spawned && Time.unscaledTime >= nextAttempt)
+        if (Time.unscaledTime >= nextSceneCheck)
         {
-            nextAttempt = Time.unscaledTime + 5f;
-            TrySpawn();
+            nextSceneCheck = Time.unscaledTime + 1f;
+            CheckScene(false);
+        }
+
+        if (loadAtTime >= 0f &&
+            Time.unscaledTime >= loadAtTime &&
+            !attemptedInCurrentScene &&
+            !modelLoaded)
+        {
+            loadAtTime = -1f;
+            attemptedInCurrentScene = true;
+
+            Log("[BLADE DEBUG] Five-second gameplay delay completed.");
+            TryLoadModel();
         }
     }
 
-    private void TrySpawn()
+    private void CheckScene(bool forceLog)
+    {
+        Scene scene = SceneManager.GetActiveScene();
+        string sceneName = scene.name ?? "";
+
+        if (!forceLog &&
+            lastSceneName != null &&
+            string.Equals(lastSceneName, sceneName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        bool changed = !string.Equals(
+            lastSceneName,
+            sceneName,
+            StringComparison.Ordinal
+        );
+
+        if (!forceLog && !changed)
+        {
+            return;
+        }
+
+        lastSceneName = sceneName;
+
+        Log(
+            "[BLADE DEBUG] Scene detected: '" +
+            sceneName +
+            "', buildIndex=" +
+            scene.buildIndex +
+            ", loaded=" +
+            scene.isLoaded
+        );
+
+        // A different scene means a fresh scene-specific attempt.
+        attemptedInCurrentScene = false;
+        loadAtTime = -1f;
+
+        if (modelLoaded)
+        {
+            Log(
+                "[BLADE DEBUG] Model already loaded; not loading a duplicate."
+            );
+            return;
+        }
+
+        if (!IsGameplayScene(sceneName, scene.isLoaded))
+        {
+            Log(
+                "[BLADE DEBUG] Skipping scene '" +
+                sceneName +
+                "': it does not match the gameplay-scene filter."
+            );
+            return;
+        }
+
+        loadAtTime = Time.unscaledTime + 5f;
+
+        Log(
+            "[BLADE DEBUG] Gameplay candidate detected. " +
+            "Model attempt scheduled in five seconds."
+        );
+    }
+
+    private bool IsGameplayScene(string sceneName, bool isLoaded)
+    {
+        if (!isLoaded || string.IsNullOrWhiteSpace(sceneName))
+        {
+            return false;
+        }
+
+        string name = sceneName.ToLowerInvariant();
+
+        // Conservative exclusions for startup, menu and transition scenes.
+        string[] excluded =
+        {
+            "intro",
+            "bootstrap",
+            "mainmenu",
+            "main_menu",
+            "menu",
+            "loading",
+            "loader",
+            "credits",
+            "options",
+            "settings",
+            "title"
+        };
+
+        foreach (string word in excluded)
+        {
+            if (name.Contains(word))
+            {
+                return false;
+            }
+        }
+
+        // ULTRAKILL campaign scenes commonly use names such as
+        // 0-1, 1-1, 4-2, 7-1, or names containing those level identifiers.
+        // We deliberately log the candidate before attempting the load.
+        if (sceneName.Length >= 3 &&
+            char.IsDigit(sceneName[0]) &&
+            sceneName[1] == '-' &&
+            char.IsDigit(sceneName[2]))
+        {
+            return true;
+        }
+
+        Log(
+            "[BLADE DEBUG] Scene name is not a recognized numeric level: '" +
+            sceneName +
+            "'. Waiting for another scene."
+        );
+
+        return false;
+    }
+
+    private void TryLoadModel()
     {
         try
         {
             Scene scene = SceneManager.GetActiveScene();
-            string sceneName = scene.name ?? "";
 
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] Checking scene: " + sceneName
+            Log(
+                "[BLADE DEBUG] Beginning model test in scene '" +
+                scene.name +
+                "'."
             );
 
-            if (!scene.isLoaded ||
-                sceneName.IndexOf("bootstrap", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                sceneName.IndexOf("intro", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                sceneName.IndexOf("menu", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                sceneName.IndexOf("loading", StringComparison.OrdinalIgnoreCase) >= 0)
+            // Verify that the scene has not changed while the timer ran.
+            if (!IsGameplayScene(scene.name ?? "", scene.isLoaded))
             {
-                BladesOfChaosPlugin.DiagLog.LogInfo(
-                    "[BLADE DIAG] Waiting for a playable scene."
+                Log(
+                    "[BLADE DEBUG] Aborting: current scene is no longer " +
+                    "recognized as gameplay."
                 );
                 return;
             }
@@ -139,132 +277,104 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
 
             if (camera == null)
             {
+                Log("[BLADE DEBUG] Camera.main is null; searching for a camera.");
                 camera = UnityEngine.Object.FindObjectOfType<Camera>();
             }
 
             if (camera == null)
             {
-                BladesOfChaosPlugin.DiagLog.LogWarning(
-                    "[BLADE DIAG] No camera found yet."
+                LogWarning(
+                    "[BLADE DEBUG] No camera found. No model was loaded."
                 );
                 return;
             }
 
-            string modelFolder = Path.Combine(
+            Log("[BLADE DEBUG] Camera found: " + camera.name);
+
+            string folder = Path.Combine(
                 Paths.PluginPath,
                 "ULTRADROID.BladesOfChaos"
             );
 
-            string modelPath = Path.Combine(
-                modelFolder,
+            string path = Path.Combine(
+                folder,
                 "blades_of_chaos_god.glb"
             );
 
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] Model folder: " + modelFolder
-            );
+            Log("[BLADE DEBUG] Expected model folder: " + folder);
+            Log("[BLADE DEBUG] Expected model path: " + path);
 
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] Model path: " + modelPath
-            );
-
-            if (Directory.Exists(modelFolder))
+            if (!Directory.Exists(folder))
             {
-                string[] files = Directory.GetFiles(modelFolder);
-
-                BladesOfChaosPlugin.DiagLog.LogInfo(
-                    "[BLADE DIAG] Files in model folder: " + files.Length
-                );
-
-                foreach (string file in files)
-                {
-                    BladesOfChaosPlugin.DiagLog.LogInfo(
-                        "[BLADE DIAG] Found file: " + Path.GetFileName(file)
-                    );
-                }
-            }
-            else
-            {
-                BladesOfChaosPlugin.DiagLog.LogWarning(
-                    "[BLADE DIAG] Model folder does not exist."
-                );
+                LogWarning("[BLADE DEBUG] Model folder does not exist.");
                 return;
             }
 
-            if (!File.Exists(modelPath))
+            foreach (string file in Directory.GetFiles(folder))
             {
-                BladesOfChaosPlugin.DiagLog.LogWarning(
-                    "[BLADE DIAG] GLB file does not exist at the expected path."
+                Log(
+                    "[BLADE DEBUG] File in model folder: " +
+                    Path.GetFileName(file)
                 );
+            }
+
+            if (!File.Exists(path))
+            {
+                LogWarning("[BLADE DEBUG] GLB file not found.");
                 return;
             }
 
-            FileInfo info = new FileInfo(modelPath);
+            FileInfo fileInfo = new FileInfo(path);
 
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] GLB size: " + info.Length + " bytes"
-            );
+            Log("[BLADE DEBUG] GLB size: " + fileInfo.Length + " bytes");
 
-            if (info.Length < 20)
+            if (fileInfo.Length < 20)
             {
-                BladesOfChaosPlugin.DiagLog.LogError(
-                    "[BLADE DIAG] GLB is too small to be a valid model."
-                );
+                LogError("[BLADE DEBUG] GLB file is too small.");
                 return;
             }
 
-            using (FileStream stream = File.OpenRead(modelPath))
+            using (FileStream stream = File.OpenRead(path))
             using (BinaryReader reader = new BinaryReader(stream))
             {
                 uint magic = reader.ReadUInt32();
                 uint version = reader.ReadUInt32();
-                uint declaredLength = reader.ReadUInt32();
+                uint length = reader.ReadUInt32();
 
-                BladesOfChaosPlugin.DiagLog.LogInfo(
-                    "[BLADE DIAG] GLB header: magic=0x" +
+                Log(
+                    "[BLADE DEBUG] GLB header: magic=0x" +
                     magic.ToString("X8") +
                     ", version=" +
                     version +
                     ", declaredLength=" +
-                    declaredLength
+                    length +
+                    ", actualLength=" +
+                    stream.Length
                 );
 
-                if (magic != 0x46546C67)
+                if (magic != 0x46546C67 || version != 2)
                 {
-                    BladesOfChaosPlugin.DiagLog.LogError(
-                        "[BLADE DIAG] Invalid GLB magic. Expected 0x46546C67."
+                    LogError(
+                        "[BLADE DEBUG] Invalid GLB header. Expected glTF 2.0."
                     );
                     return;
                 }
 
-                if (version != 2)
+                if (length < 20 || length > stream.Length)
                 {
-                    BladesOfChaosPlugin.DiagLog.LogError(
-                        "[BLADE DIAG] Unsupported GLB version: " + version
-                    );
-                    return;
-                }
-
-                if (declaredLength > stream.Length ||
-                    declaredLength < 20)
-                {
-                    BladesOfChaosPlugin.DiagLog.LogError(
-                        "[BLADE DIAG] GLB declared length is invalid."
-                    );
+                    LogError("[BLADE DEBUG] Invalid declared GLB length.");
                     return;
                 }
             }
 
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] Calling ModelAPI.LoadGLB..."
-            );
+            Log("[BLADE DEBUG] Calling ModelAPI.LoadGLB now.");
 
-            GameObject model = ModelAPI.LoadGLB(
-                modelPath,
+            GameObject result = ModelAPI.LoadGLB(
+                path,
                 camera.transform,
                 new ModelLoadOptions
                 {
-                    Name = "ULTRADROID_BladesOfChaos_Test",
+                    Name = "ULTRADROID_BladesOfChaos_DebugModel",
                     Position = new Vector3(0f, 0f, 2f),
                     RotationEuler = Vector3.zero,
                     Scale = new Vector3(0.1f, 0.1f, 0.1f),
@@ -273,38 +383,32 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
                 }
             );
 
-            if (model == null)
+            if (result == null)
             {
-                BladesOfChaosPlugin.DiagLog.LogError(
-                    "[BLADE DIAG] ModelAPI.LoadGLB returned NULL."
-                );
+                LogError("[BLADE DEBUG] LoadGLB returned null.");
                 return;
             }
 
-            MeshFilter[] meshes = model.GetComponentsInChildren<MeshFilter>(true);
-            Renderer[] renderers = model.GetComponentsInChildren<Renderer>(true);
+            MeshFilter[] meshes =
+                result.GetComponentsInChildren<MeshFilter>(true);
 
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] Model returned: " + model.name
-            );
+            Renderer[] renderers =
+                result.GetComponentsInChildren<Renderer>(true);
 
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] MeshFilter count: " + meshes.Length
-            );
+            Log("[BLADE DEBUG] Model GameObject: " + result.name);
+            Log("[BLADE DEBUG] MeshFilter count: " + meshes.Length);
+            Log("[BLADE DEBUG] Renderer count: " + renderers.Length);
 
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] Renderer count: " + renderers.Length
-            );
-
-            foreach (MeshFilter meshFilter in meshes)
+            foreach (MeshFilter filter in meshes)
             {
-                if (meshFilter != null && meshFilter.sharedMesh != null)
+                if (filter != null && filter.sharedMesh != null)
                 {
-                    BladesOfChaosPlugin.DiagLog.LogInfo(
-                        "[BLADE DIAG] Mesh: " +
-                        meshFilter.sharedMesh.name +
-                        ", vertices=" +
-                        meshFilter.sharedMesh.vertexCount
+                    Log(
+                        "[BLADE DEBUG] Mesh '" +
+                        filter.sharedMesh.name +
+                        "' has " +
+                        filter.sharedMesh.vertexCount +
+                        " vertices."
                     );
                 }
             }
@@ -313,27 +417,46 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             {
                 if (renderer != null)
                 {
-                    BladesOfChaosPlugin.DiagLog.LogInfo(
-                        "[BLADE DIAG] Renderer: " +
+                    Log(
+                        "[BLADE DEBUG] Renderer '" +
                         renderer.name +
-                        ", enabled=" +
+                        "', enabled=" +
                         renderer.enabled
                     );
                 }
             }
 
-            spawned = true;
-
-            BladesOfChaosPlugin.DiagLog.LogInfo(
-                "[BLADE DIAG] Model loading call completed."
-            );
+            modelLoaded = true;
+            Log("[BLADE DEBUG] MODEL LOAD CALL SUCCEEDED.");
         }
         catch (Exception ex)
         {
-            BladesOfChaosPlugin.DiagLog.LogError(
-                "[BLADE DIAG] Exception while checking/loading model:"
-            );
-            BladesOfChaosPlugin.DiagLog.LogError(ex.ToString());
+            LogError("[BLADE DEBUG] Model loading threw an exception:");
+            LogError(ex.ToString());
+        }
+    }
+
+    private static void Log(string message)
+    {
+        if (BladesOfChaosPlugin.DiagLog != null)
+        {
+            BladesOfChaosPlugin.DiagLog.LogInfo(message);
+        }
+    }
+
+    private static void LogWarning(string message)
+    {
+        if (BladesOfChaosPlugin.DiagLog != null)
+        {
+            BladesOfChaosPlugin.DiagLog.LogWarning(message);
+        }
+    }
+
+    private static void LogError(string message)
+    {
+        if (BladesOfChaosPlugin.DiagLog != null)
+        {
+            BladesOfChaosPlugin.DiagLog.LogError(message);
         }
     }
 }
