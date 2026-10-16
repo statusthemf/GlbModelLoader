@@ -12,7 +12,7 @@ using ULTRADROID.Models;
 [BepInPlugin(
     "com.statusthemf.ultradroid.bladesofchaos",
     "ULTRADROID Blades of Chaos",
-    "0.4.3"
+    "0.4.4"
 )]
 [BepInDependency(
     "com.statusthemf.ultradroid.models",
@@ -26,7 +26,7 @@ public sealed class BladesOfChaosPlugin : BasePlugin
     {
         DiagLog = Log;
 
-        Log.LogInfo("[BLADE DEBUG 0.4.3] Plugin starting.");
+        Log.LogInfo("[BLADE DEBUG 0.4.4] Plugin starting.");
         Log.LogInfo("[BLADE DEBUG] Plugin directory: " + Paths.PluginPath);
 
         try
@@ -81,12 +81,12 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
         ClassInjector.DerivedConstructorBody(this);
     }
 
-    private void OnEnable()
+    public void OnEnable()
     {
         Log("[BLADE DEBUG] Runner OnEnable called.");
     }
 
-    private void Start()
+    public void Start()
     {
         Log("[BLADE DEBUG] Runner Start called.");
 
@@ -101,7 +101,7 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
         }
     }
 
-    private void Update()
+    public void Update()
     {
         updateCount++;
         float now = Time.unscaledTime;
@@ -249,7 +249,6 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
                 return false;
         }
 
-        // Recognize numeric level identifiers such as 0-1, 1-1, 7-1.
         for (int i = 0; i + 2 < sceneName.Length; i++)
         {
             if (char.IsDigit(sceneName[i]) &&
