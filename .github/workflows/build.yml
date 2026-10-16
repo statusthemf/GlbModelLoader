@@ -1,3 +1,4 @@
+
 name: Build ULTRADROID Models API and Example
 
 on:
@@ -33,24 +34,33 @@ jobs:
 
           for file in "${required[@]}"; do
             if [[ ! -f "$file" ]]; then
-              echo "::error::Missing required target-game reference: $file"
+              echo "::error::Missing required game assembly: $file"
               missing=1
             fi
           done
 
           if [[ "$missing" -ne 0 ]]; then
-            echo "Required game assemblies are missing."
+            echo "One or more required game assemblies are missing from the repository root."
             exit 1
           fi
 
       - name: Restore API and example
-        run: dotnet restore examples/ExampleMod.csproj
+        run: >
+          dotnet restore examples/ExampleMod.csproj
+          --source https://api.nuget.org/v3/index.json
+          --source https://nuget.bepinex.dev/v3/index.json
 
       - name: Build API
-        run: dotnet build ULTRADROID.Models.csproj --configuration Release --no-restore
+        run: >
+          dotnet build ULTRADROID.Models.csproj
+          --configuration Release
+          --no-restore
 
       - name: Build example mod
-        run: dotnet build examples/ExampleMod.csproj --configuration Release --no-restore
+        run: >
+          dotnet build examples/ExampleMod.csproj
+          --configuration Release
+          --no-restore
 
       - name: Upload API and example DLLs
         uses: actions/upload-artifact@v4
