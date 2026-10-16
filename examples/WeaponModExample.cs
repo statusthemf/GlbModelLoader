@@ -12,7 +12,7 @@ using ULTRADROID.Models;
 [BepInPlugin(
     "com.statusthemf.ultradroid.bladesofchaos",
     "ULTRADROID Blades of Chaos",
-    "0.4.1"
+    "0.4.3"
 )]
 [BepInDependency(
     "com.statusthemf.ultradroid.models",
@@ -26,29 +26,26 @@ public sealed class BladesOfChaosPlugin : BasePlugin
     {
         DiagLog = Log;
 
-        Log.LogInfo("[BLADE DEBUG 0.4.1] Plugin starting.");
+        Log.LogInfo("[BLADE DEBUG 0.4.3] Plugin starting.");
         Log.LogInfo("[BLADE DEBUG] Plugin directory: " + Paths.PluginPath);
 
         try
         {
             ClassInjector.RegisterTypeInIl2Cpp<BladesOfChaosDiagnosticRunner>();
-
             Log.LogInfo("[BLADE DEBUG] Runner type registered.");
 
             GameObject runnerObject =
                 new GameObject("ULTRADROID_BladesOfChaos_DebugRunner");
 
             UnityEngine.Object.DontDestroyOnLoad(runnerObject);
-
             runnerObject.AddComponent<BladesOfChaosDiagnosticRunner>();
 
             Log.LogInfo("[BLADE DEBUG] Runner component attached.");
 
-            // Do not access Scene.buildIndex.
             Scene scene = SceneManager.GetActiveScene();
 
             Log.LogInfo(
-                "[BLADE DEBUG] Initial scene name='" +
+                "[BLADE DEBUG] Initial scene='" +
                 scene.name +
                 "', loaded=" +
                 scene.isLoaded
@@ -92,16 +89,23 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
     private void Start()
     {
         Log("[BLADE DEBUG] Runner Start called.");
-        CheckScene(true);
+
+        try
+        {
+            CheckScene(true);
+        }
+        catch (Exception ex)
+        {
+            LogError("[BLADE DEBUG] Initial scene check failed:");
+            LogError(ex.ToString());
+        }
     }
 
     private void Update()
     {
         updateCount++;
-
         float now = Time.unscaledTime;
 
-        // Heartbeat: confirms whether Update() is running.
         if (now >= nextStatusLog)
         {
             nextStatusLog = now + 5f;
@@ -121,12 +125,11 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             }
             catch (Exception ex)
             {
-                LogError("[BLADE DEBUG] Failed to inspect active scene:");
+                LogError("[BLADE DEBUG] Heartbeat failed:");
                 LogError(ex.ToString());
             }
         }
 
-        // Poll for scene transitions without using sceneLoaded callbacks.
         if (now >= nextSceneCheck)
         {
             nextSceneCheck = now + 1f;
@@ -142,7 +145,6 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             }
         }
 
-        // Only attempt loading after the gameplay delay.
         if (nextModelAttempt >= 0f &&
             now >= nextModelAttempt &&
             !modelLoaded)
@@ -156,16 +158,15 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             if (success)
             {
                 modelLoaded = true;
-                Log("[BLADE DEBUG] Model loading returned a GameObject.");
+                Log("[BLADE DEBUG] Model load returned a GameObject.");
             }
             else
             {
-                // Retry while this scene remains active.
                 nextModelAttempt = Time.unscaledTime + 5f;
 
                 Log(
-                    "[BLADE DEBUG] Model attempt failed. " +
-                    "Will retry in five seconds if this scene remains active."
+                    "[BLADE DEBUG] Attempt failed. " +
+                    "Retrying in five seconds if gameplay remains active."
                 );
             }
         }
@@ -183,41 +184,38 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
         );
 
         if (!forceLog && !changed)
-        {
             return;
-        }
 
         lastSceneName = sceneName;
+        nextModelAttempt = -1f;
 
         Log(
-            "[BLADE DEBUG] SCENE CHANGE/INITIAL CHECK: name='" +
+            "[BLADE DEBUG] Scene detected: '" +
             sceneName +
             "', loaded=" +
             scene.isLoaded
         );
-
-        // Cancel any pending attempt from the previous scene.
-        nextModelAttempt = -1f;
-
-        // The model belongs to the previous level's camera.
-        // Permit another attempt after entering a different scene.
-        modelLoaded = false;
 
         if (!IsGameplayScene(sceneName, scene.isLoaded))
         {
             Log(
                 "[BLADE DEBUG] Skipping scene '" +
                 sceneName +
-                "'. It does not match the current gameplay filter."
+                "': not recognized as gameplay."
             );
+            return;
+        }
 
+        if (modelLoaded)
+        {
+            Log("[BLADE DEBUG] Model already loaded; skipping duplicate.");
             return;
         }
 
         nextModelAttempt = Time.unscaledTime + 5f;
 
         Log(
-            "[BLADE DEBUG] Gameplay scene candidate detected: '" +
+            "[BLADE DEBUG] Gameplay candidate detected: '" +
             sceneName +
             "'. Model attempt scheduled in five seconds."
         );
@@ -226,9 +224,7 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
     private bool IsGameplayScene(string sceneName, bool isLoaded)
     {
         if (!isLoaded || string.IsNullOrWhiteSpace(sceneName))
-        {
             return false;
-        }
 
         string lower = sceneName.ToLowerInvariant();
 
@@ -250,13 +246,10 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
         foreach (string word in excluded)
         {
             if (lower.Contains(word))
-            {
                 return false;
-            }
         }
 
-        // Accept level identifiers such as 0-1, 1-1, or 7-1
-        // even if the scene name includes extra text, e.g. "Level 7-1".
+        // Recognize numeric level identifiers such as 0-1, 1-1, 7-1.
         for (int i = 0; i + 2 < sceneName.Length; i++)
         {
             if (char.IsDigit(sceneName[i]) &&
@@ -267,18 +260,15 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             }
         }
 
-        // Also allow the known naming pattern used by Prime levels.
         string upper = sceneName.ToUpperInvariant();
 
         if (upper.Contains("P-1") || upper.Contains("P-2"))
-        {
             return true;
-        }
 
         Log(
             "[BLADE DEBUG] Unrecognized scene name: '" +
             sceneName +
-            "'. It is not accepted as gameplay yet."
+            "'."
         );
 
         return false;
@@ -292,19 +282,14 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             string sceneName = scene.name ?? "";
 
             Log(
-                "[BLADE DEBUG] Beginning model attempt in scene '" +
+                "[BLADE DEBUG] Starting model attempt in scene '" +
                 sceneName +
                 "'."
             );
 
-            // Check again in case the player left the level during the delay.
             if (!IsGameplayScene(sceneName, scene.isLoaded))
             {
-                Log(
-                    "[BLADE DEBUG] Cancelled: the active scene is not " +
-                    "recognized as gameplay."
-                );
-
+                Log("[BLADE DEBUG] Cancelled: not a recognized gameplay scene.");
                 return false;
             }
 
@@ -312,8 +297,7 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
 
             if (camera == null)
             {
-                Log("[BLADE DEBUG] Camera.main is null; searching for a camera.");
-
+                Log("[BLADE DEBUG] Camera.main is null; searching for camera.");
                 camera = UnityEngine.Object.FindObjectOfType<Camera>();
             }
 
@@ -350,10 +334,7 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
 
             foreach (string file in files)
             {
-                Log(
-                    "[BLADE DEBUG] Found file: " +
-                    Path.GetFileName(file)
-                );
+                Log("[BLADE DEBUG] Found file: " + Path.GetFileName(file));
             }
 
             if (!File.Exists(path))
@@ -468,39 +449,31 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             }
 
             Log("[BLADE DEBUG] MODEL LOAD CALL COMPLETED.");
-
             return true;
         }
         catch (Exception ex)
         {
-            LogError("[BLADE DEBUG] Model loading/check threw an exception:");
+            LogError("[BLADE DEBUG] Model loading/check failed:");
             LogError(ex.ToString());
-
             return false;
         }
     }
 
     private static void Log(string message)
     {
-        if (DiagLog != null)
-        {
-            DiagLog.LogInfo(message);
-        }
+        if (BladesOfChaosPlugin.DiagLog != null)
+            BladesOfChaosPlugin.DiagLog.LogInfo(message);
     }
 
     private static void LogWarning(string message)
     {
-        if (DiagLog != null)
-        {
-            DiagLog.LogWarning(message);
-        }
+        if (BladesOfChaosPlugin.DiagLog != null)
+            BladesOfChaosPlugin.DiagLog.LogWarning(message);
     }
 
     private static void LogError(string message)
     {
-        if (DiagLog != null)
-        {
-            DiagLog.LogError(message);
-        }
+        if (BladesOfChaosPlugin.DiagLog != null)
+            BladesOfChaosPlugin.DiagLog.LogError(message);
     }
 }
