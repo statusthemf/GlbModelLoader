@@ -1,6 +1,6 @@
 // ULTRADROID Models API - GLB 2.0 loader
 // Target: Unity 2021.3 / BepInEx IL2CPP (Android)
-// Version with safer Newtonsoft.Json deserialization
+// Simple Newtonsoft.Json version (no JsonSerializerSettings)
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -23,7 +23,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.1-safer-json";
+        public const string Version = "0.1.1-simple-newtonsoft";
 
         private static void Log(string message)
         {
@@ -1024,28 +1024,15 @@ namespace ULTRADROID.Models
                 jsonText.Length);
 
             // ============================================================
-            // SAFER NEWTONSOFT DESERIALIZATION
+            // SIMPLE NEWTONSOFT CALL (IL2CPP-safe)
             // ============================================================
-            Debug.Log("[ULTRADROID Models] Parse: calling Newtonsoft.Json (safer settings)");
+            Debug.Log("[ULTRADROID Models] Parse: calling Newtonsoft.Json (simple)");
 
             GltfRoot root;
 
             try
             {
-                var settings = new JsonSerializerSettings
-                {
-                    // Reduce reflection / type resolution pressure on IL2CPP
-                    TypeNameHandling = TypeNameHandling.None,
-                    MetadataPropertyHandling = MetadataPropertyHandling.Ignore,
-                    MissingMemberHandling = MissingMemberHandling.Ignore,
-                    NullValueHandling = NullValueHandling.Ignore,
-                    DefaultValueHandling = DefaultValueHandling.Populate,
-                    // Avoid some heavy converters
-                    FloatParseHandling = FloatParseHandling.Double,
-                    DateParseHandling = DateParseHandling.None
-                };
-
-                root = JsonConvert.DeserializeObject<GltfRoot>(jsonText, settings);
+                root = JsonConvert.DeserializeObject<GltfRoot>(jsonText);
 
                 Debug.Log("[ULTRADROID Models] Parse: Newtonsoft.Json returned");
             }
