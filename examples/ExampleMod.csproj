@@ -7,10 +7,15 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <RestoreAdditionalProjectSources>
+      https://nuget.bepinex.dev/v3/index.json
+    </RestoreAdditionalProjectSources>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="../ULTRADROID.Models.csproj" />
+
     <PackageReference
       Include="BepInEx.Unity.IL2CPP"
       Version="6.0.0-be.*"
@@ -21,9 +26,11 @@
     <Reference Include="Assembly-CSharp">
       <HintPath>../Assembly-CSharp.dll</HintPath>
     </Reference>
+
     <Reference Include="Il2Cppmscorlib">
       <HintPath>../Il2Cppmscorlib.dll</HintPath>
     </Reference>
+
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>../UnityEngine.CoreModule.dll</HintPath>
     </Reference>
