@@ -1,13 +1,14 @@
-
- // ULTRADROID Models API - GLB 2.0 loader
- // Target: Unity 2021.3 / BepInEx IL2CPP
- // Diagnostic build: logs the last completed loader operation.
+// ULTRADROID Models API - GLB 2.0 loader
+// Target: Unity 2021.3 / BepInEx IL2CPP
+// Diagnostic build: logs the last completed loader operation.
+// Updated: JsonUtility → Newtonsoft.Json
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
+using Newtonsoft.Json;
 
 namespace ULTRADROID.Models
 {
@@ -561,7 +562,8 @@ namespace ULTRADROID.Models
                     node.rotation[3]);
             }
 
-            if (node.scale != null && node.scale.Length >= 3)
+            if (node.scale != null &&
+                node.scale.Length >= 3)
             {
                 transform.localScale = new Vector3(
                     node.scale[0],
@@ -1022,18 +1024,35 @@ namespace ULTRADROID.Models
                 "[ULTRADROID Models] Parse: JSON extracted; chars=" +
                 jsonText.Length);
 
+            // ===== REPLACED JsonUtility WITH Newtonsoft.Json =====
             Debug.Log(
-                "[ULTRADROID Models] Parse: calling JsonUtility.FromJson");
+                "[ULTRADROID Models] Parse: calling Newtonsoft.Json");
 
-            GltfRoot root =
-                UnityEngine.JsonUtility.FromJson<GltfRoot>(jsonText);
+            GltfRoot root;
 
-            Debug.Log(
-                "[ULTRADROID Models] Parse: JsonUtility returned");
+            try
+            {
+                root = JsonConvert.DeserializeObject<GltfRoot>(jsonText);
+
+                Debug.Log(
+                    "[ULTRADROID Models] Parse: Newtonsoft.Json returned");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[ULTRADROID Models] Newtonsoft JSON parsing failed:\n" +
+                    ex);
+
+                throw new InvalidDataException(
+                    "Failed to deserialize the GLB JSON chunk.", ex);
+            }
 
             if (root == null)
+            {
                 throw new InvalidDataException(
                     "GLB JSON deserialization returned null.");
+            }
+            // ===== END OF REPLACEMENT =====
 
             if (root.asset == null ||
                 string.IsNullOrEmpty(root.asset.version))
