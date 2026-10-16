@@ -38,10 +38,6 @@
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>../UnityEngine.CoreModule.dll</HintPath>
     </Reference>
-
-    <Reference Include="UnityEngine.SceneManagementModule">
-      <HintPath>../UnityEngine.SceneManagementModule.dll</HintPath>
-    </Reference>
   </ItemGroup>
 
 </Project>
