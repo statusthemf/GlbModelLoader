@@ -1,5 +1,7 @@
 // ULTRADROID Models API - first GLB 2.0 loader prototype
 // Target: Unity / BepInEx IL2CPP. Source scaffold; compile against the exact game references.
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using Il2CppSystem.Collections.Generic;
 using System;
 using System.Collections.Generic;
 using System.IO;
