@@ -6,18 +6,38 @@
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>disable</Nullable>
-    <RestoreAdditionalProjectSources>https://nuget.bepinex.dev/v3/index.json</RestoreAdditionalProjectSources>
+    <RestoreAdditionalProjectSources>
+      https://nuget.bepinex.dev/v3/index.json
+    </RestoreAdditionalProjectSources>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.*" IncludeAssets="compile" />
+    <PackageReference Include="BepInEx.Unity.IL2CPP"
+                      Version="6.0.0-be.*"
+                      IncludeAssets="compile" />
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="Assembly-CSharp"><HintPath>Assembly-CSharp.dll</HintPath></Reference>
-    <Reference Include="Il2Cppmscorlib"><HintPath>Il2Cppmscorlib.dll</HintPath></Reference>
-    <Reference Include="UnityEngine.CoreModule"><HintPath>UnityEngine.CoreModule.dll</HintPath></Reference>
-    <Reference Include="UnityEngine.ImageConversionModule"><HintPath>UnityEngine.ImageConversionModule.dll</HintPath></Reference>
-    <Reference Include="UnityEngine.PhysicsModule"><HintPath>UnityEngine.PhysicsModule.dll</HintPath></Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>Il2Cppmscorlib.dll</HintPath>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>Il2CppInterop.Runtime.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>UnityEngine.JSONSerializeModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>UnityEngine.ImageConversionModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>UnityEngine.PhysicsModule.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>
