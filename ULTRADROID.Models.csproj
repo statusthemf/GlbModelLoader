@@ -25,6 +25,10 @@
       <HintPath>Assembly-CSharp.dll</HintPath>
     </Reference>
 
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>UnityEngine.JSONSerializeModule.dll</HintPath>
+    </Reference>
+
     <Reference Include="Il2Cppmscorlib">
       <HintPath>Il2Cppmscorlib.dll</HintPath>
     </Reference>
