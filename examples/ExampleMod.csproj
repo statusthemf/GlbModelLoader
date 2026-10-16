@@ -44,9 +44,4 @@
     </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <Compile Include="WeaponModExample.cs" />
-    <Compile Remove="BladesOfChaosPlugin.cs" />
-  </ItemGroup>
-
 </Project>
