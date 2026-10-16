@@ -1,9 +1,10 @@
+
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>ExampleMod</AssemblyName>
-    <RootNamespace>ULTRADROID.Models.Example</RootNamespace>
+    <RootNamespace>ULTRADROID.BladesOfChaos</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -33,6 +34,10 @@
 
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>../UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+
+    <Reference Include="UnityEngine.SceneManagementModule">
+      <HintPath>../UnityEngine.SceneManagementModule.dll</HintPath>
     </Reference>
   </ItemGroup>
 
