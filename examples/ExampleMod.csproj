@@ -1,9 +1,8 @@
-
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <AssemblyName>ExampleMod</AssemblyName>
+    <AssemblyName>WeaponModExample</AssemblyName>
     <RootNamespace>ULTRADROID.BladesOfChaos</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
@@ -32,6 +31,10 @@
       <HintPath>../Il2Cppmscorlib.dll</HintPath>
     </Reference>
 
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>../Il2CppInterop.Runtime.dll</HintPath>
+    </Reference>
+
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>../UnityEngine.CoreModule.dll</HintPath>
     </Reference>
@@ -39,6 +42,11 @@
     <Reference Include="UnityEngine.SceneManagementModule">
       <HintPath>../UnityEngine.SceneManagementModule.dll</HintPath>
     </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="WeaponModExample.cs" />
+    <Compile Remove="BladesOfChaosPlugin.cs" />
   </ItemGroup>
 
 </Project>
