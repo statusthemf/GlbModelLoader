@@ -1,4 +1,4 @@
-name: Build ULTRADROID Models API
+name: Build ULTRADROID Models API and Example
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,27 +28,35 @@ jobs:
             UnityEngine.ImageConversionModule.dll
             UnityEngine.PhysicsModule.dll
           )
+
           missing=0
+
           for file in "${required[@]}"; do
             if [[ ! -f "$file" ]]; then
               echo "::error::Missing required target-game reference: $file"
               missing=1
             fi
           done
+
           if [[ "$missing" -ne 0 ]]; then
-            echo "Add the exact DLLs from the target ULTRAKILL build to the repository root (or update the HintPath values in the csproj). Do not use DLLs from a different Unity build."
+            echo "Required game assemblies are missing."
             exit 1
           fi
 
-      - name: Restore dependencies
-        run: dotnet restore ULTRADROID.Models.csproj
+      - name: Restore API and example
+        run: dotnet restore examples/ExampleMod.csproj
 
-      - name: Build Release
+      - name: Build API
         run: dotnet build ULTRADROID.Models.csproj --configuration Release --no-restore
 
-      - name: Upload compiled plugin
+      - name: Build example mod
+        run: dotnet build examples/ExampleMod.csproj --configuration Release --no-restore
+
+      - name: Upload API and example DLLs
         uses: actions/upload-artifact@v4
         with:
-          name: ULTRADROID-Models-net10
-          path: bin/Release/net10.0/ULTRADROID.Models.dll
+          name: ULTRADROID-Models-and-Example-net10
+          path: |
+            bin/Release/net10.0/ULTRADROID.Models.dll
+            examples/bin/Release/net10.0/ExampleMod.dll
           if-no-files-found: error
