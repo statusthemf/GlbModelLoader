@@ -1,3 +1,4 @@
+
 using System;
 using System.IO;
 using BepInEx;
@@ -22,9 +23,8 @@ namespace ULTRADROID.BladesOfChaos
     {
         public override void Load()
         {
-            Log.LogInfo("================================================");
             Log.LogInfo("[BladesOfChaos DIAG] VERSION 0.2.0 STARTING");
-            Log.LogInfo("[BladesOfChaos DIAG] Plugin directory: " + Paths.PluginPath);
+            Log.LogInfo("[BladesOfChaos DIAG] Plugin path: " + Paths.PluginPath);
 
             try
             {
@@ -36,16 +36,12 @@ namespace ULTRADROID.BladesOfChaos
                 UnityEngine.Object.DontDestroyOnLoad(runnerObject);
                 runnerObject.AddComponent<BladesOfChaosDiagnosticRunner>();
 
-                Log.LogInfo("[BladesOfChaos DIAG] Diagnostic runner created.");
+                Log.LogInfo("[BladesOfChaos DIAG] Runner created.");
             }
             catch (Exception ex)
             {
-                Log.LogError(
-                    "[BladesOfChaos DIAG] Could not create runner:\n" + ex
-                );
+                Log.LogError("[BladesOfChaos DIAG] Runner creation failed:\n" + ex);
             }
-
-            Log.LogInfo("================================================");
         }
     }
 
@@ -53,6 +49,7 @@ namespace ULTRADROID.BladesOfChaos
     {
         private bool finished;
         private float nextStatusTime;
+        private float nextAttemptTime;
         private int waitingFrames;
 
         public BladesOfChaosDiagnosticRunner(IntPtr ptr) : base(ptr)
@@ -72,7 +69,6 @@ namespace ULTRADROID.BladesOfChaos
 
             waitingFrames++;
 
-            // Print a status message periodically, not every frame.
             if (Time.unscaledTime >= nextStatusTime)
             {
                 nextStatusTime = Time.unscaledTime + 5f;
@@ -80,141 +76,116 @@ namespace ULTRADROID.BladesOfChaos
                 try
                 {
                     Scene scene = SceneManager.GetActiveScene();
+                    Camera camera = Camera.main;
 
-                    Camera mainCamera = Camera.main;
-                    if (mainCamera == null)
-                        mainCamera = UnityEngine.Object.FindObjectOfType<Camera>();
-
-                    string cameraName =
-                        mainCamera != null ? mainCamera.name : "<no camera>";
+                    if (camera == null)
+                        camera = UnityEngine.Object.FindObjectOfType<Camera>();
 
                     Debug.Log(
                         "[BladesOfChaos DIAG] Waiting. Scene='" +
                         scene.name +
                         "', loaded=" + scene.isLoaded +
-                        ", camera='" + cameraName +
+                        ", camera='" +
+                        (camera != null ? camera.name : "<no camera>") +
                         "', frames=" + waitingFrames
                     );
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError(
-                        "[BladesOfChaos DIAG] Status check failed: " + ex
-                    );
+                    Debug.LogError("[BladesOfChaos DIAG] Status check failed:\n" + ex);
                 }
             }
 
+            if (Time.unscaledTime < nextAttemptTime)
+                return;
+
+            nextAttemptTime = Time.unscaledTime + 5f;
             TryLoadModel();
         }
 
         private void TryLoadModel()
         {
-            Scene scene;
-
             try
             {
-                scene = SceneManager.GetActiveScene();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError(
-                    "[BladesOfChaos DIAG] Cannot read active scene: " + ex
+                Scene scene = SceneManager.GetActiveScene();
+
+                if (!scene.IsValid() || !scene.isLoaded)
+                    return;
+
+                string sceneName = scene.name ?? "";
+                string lowerName = sceneName.ToLowerInvariant();
+
+                if (lowerName.Contains("bootstrap") ||
+                    lowerName.Contains("intro") ||
+                    lowerName.Contains("menu") ||
+                    lowerName.Contains("loading"))
+                {
+                    return;
+                }
+
+                Camera targetCamera = Camera.main;
+
+                if (targetCamera == null)
+                    targetCamera = UnityEngine.Object.FindObjectOfType<Camera>();
+
+                if (targetCamera == null)
+                    return;
+
+                string modelDirectory = Path.Combine(
+                    Paths.PluginPath,
+                    "ULTRADROID.BladesOfChaos"
                 );
-                return;
-            }
 
-            if (!scene.IsValid() || !scene.isLoaded)
-                return;
+                string modelPath = Path.Combine(
+                    modelDirectory,
+                    "blades_of_chaos_god.glb"
+                );
 
-            string sceneName = scene.name ?? "";
-            string lowerSceneName = sceneName.ToLowerInvariant();
+                Debug.Log("[BladesOfChaos DIAG] Gameplay scene: " + sceneName);
+                Debug.Log("[BladesOfChaos DIAG] Camera: " + targetCamera.name);
+                Debug.Log("[BladesOfChaos DIAG] Model path: " + modelPath);
 
-            if (lowerSceneName.Contains("bootstrap") ||
-                lowerSceneName.Contains("intro") ||
-                lowerSceneName.Contains("menu") ||
-                lowerSceneName.Contains("loading"))
-            {
-                return;
-            }
-
-            Camera targetCamera = Camera.main;
-
-            if (targetCamera == null)
-                targetCamera = UnityEngine.Object.FindObjectOfType<Camera>();
-
-            if (targetCamera == null)
-                return;
-
-            finished = true;
-
-            string modelDirectory = Path.Combine(
-                Paths.PluginPath,
-                "ULTRADROID.BladesOfChaos"
-            );
-
-            string modelPath = Path.Combine(
-                modelDirectory,
-                "blades_of_chaos_god.glb"
-            );
-
-            Debug.Log("[BladesOfChaos DIAG] Gameplay scene detected: " + sceneName);
-            Debug.Log("[BladesOfChaos DIAG] Camera found: " + targetCamera.name);
-            Debug.Log("[BladesOfChaos DIAG] Model directory: " + modelDirectory);
-            Debug.Log("[BladesOfChaos DIAG] Model path: " + modelPath);
-
-            try
-            {
                 if (!Directory.Exists(modelDirectory))
                 {
                     Debug.LogError(
-                        "[BladesOfChaos DIAG] MODEL DIRECTORY DOES NOT EXIST."
+                        "[BladesOfChaos DIAG] MODEL DIRECTORY NOT FOUND: " +
+                        modelDirectory
                     );
-                    finished = false;
                     return;
                 }
 
                 string[] files = Directory.GetFiles(modelDirectory);
 
                 Debug.Log(
-                    "[BladesOfChaos DIAG] Files in model directory: " +
+                    "[BladesOfChaos DIAG] Files in model folder: " +
                     files.Length
                 );
 
-                for (int i = 0; i < files.Length; i++)
-                {
-                    Debug.Log(
-                        "[BladesOfChaos DIAG] File[" + i + "]: " + files[i]
-                    );
-                }
+                foreach (string file in files)
+                    Debug.Log("[BladesOfChaos DIAG] File: " + file);
 
                 if (!File.Exists(modelPath))
                 {
                     Debug.LogError(
-                        "[BladesOfChaos DIAG] GLB FILE NOT FOUND. " +
-                        "The filename must be exactly: blades_of_chaos_god.glb"
+                        "[BladesOfChaos DIAG] GLB NOT FOUND. Expected exact filename: " +
+                        "blades_of_chaos_god.glb"
                     );
-
-                    finished = false;
                     return;
                 }
 
                 FileInfo info = new FileInfo(modelPath);
 
                 Debug.Log(
-                    "[BladesOfChaos DIAG] GLB exists. Size: " +
+                    "[BladesOfChaos DIAG] GLB size: " +
                     info.Length + " bytes"
                 );
 
                 if (info.Length < 20)
                 {
-                    Debug.LogError(
-                        "[BladesOfChaos DIAG] GLB is suspiciously small."
-                    );
-                    finished = false;
+                    Debug.LogError("[BladesOfChaos DIAG] GLB file is too small.");
                     return;
                 }
 
-                // Read the GLB header: magic should be "glTF".
                 using (FileStream stream = File.OpenRead(modelPath))
                 using (BinaryReader reader = new BinaryReader(stream))
                 {
@@ -231,34 +202,24 @@ namespace ULTRADROID.BladesOfChaos
 
                     if (magic != 0x46546C67)
                     {
-                        Debug.LogError(
-                            "[BladesOfChaos DIAG] INVALID GLB MAGIC. " +
-                            "The file may not be a valid binary glTF."
-                        );
-                        finished = false;
+                        Debug.LogError("[BladesOfChaos DIAG] Invalid GLB magic.");
                         return;
                     }
 
                     if (version != 2)
                     {
-                        Debug.LogError(
-                            "[BladesOfChaos DIAG] Expected GLB version 2."
-                        );
-                        finished = false;
+                        Debug.LogError("[BladesOfChaos DIAG] GLB version must be 2.");
                         return;
                     }
 
-                    if (declaredLength > stream.Length)
+                    if (declaredLength > stream.Length || declaredLength < 20)
                     {
-                        Debug.LogError(
-                            "[BladesOfChaos DIAG] Header length exceeds file size."
-                        );
-                        finished = false;
+                        Debug.LogError("[BladesOfChaos DIAG] Invalid GLB declared length.");
                         return;
                     }
                 }
 
-                Debug.Log("[BladesOfChaos DIAG] Calling ModelAPI.LoadGLB now.");
+                Debug.Log("[BladesOfChaos DIAG] Calling ModelAPI.LoadGLB...");
 
                 ModelLoadOptions options = new ModelLoadOptions
                 {
@@ -278,15 +239,14 @@ namespace ULTRADROID.BladesOfChaos
 
                 if (model == null)
                 {
-                    Debug.LogError(
-                        "[BladesOfChaos DIAG] ModelAPI.LoadGLB returned NULL."
-                    );
+                    Debug.LogError("[BladesOfChaos DIAG] LoadGLB returned NULL.");
                     return;
                 }
 
+                finished = true;
+
                 Debug.Log(
-                    "[BladesOfChaos DIAG] LoadGLB returned object: " +
-                    model.name
+                    "[BladesOfChaos DIAG] Model object created: " + model.name
                 );
 
                 MeshFilter[] meshFilters =
@@ -307,21 +267,13 @@ namespace ULTRADROID.BladesOfChaos
 
                 for (int i = 0; i < meshFilters.Length; i++)
                 {
-                    MeshFilter filter = meshFilters[i];
-
-                    string meshName =
-                        filter.sharedMesh != null
-                            ? filter.sharedMesh.name
-                            : "<null>";
-
-                    int vertexCount =
-                        filter.sharedMesh != null
-                            ? filter.sharedMesh.vertexCount
-                            : 0;
+                    Mesh mesh = meshFilters[i].sharedMesh;
 
                     Debug.Log(
-                        "[BladesOfChaos DIAG] Mesh[" + i + "]='" +
-                        meshName + "', vertices=" + vertexCount
+                        "[BladesOfChaos DIAG] Mesh[" + i + "]: " +
+                        (mesh != null ? mesh.name : "<null>") +
+                        ", vertices=" +
+                        (mesh != null ? mesh.vertexCount : 0)
                     );
                 }
 
@@ -330,9 +282,9 @@ namespace ULTRADROID.BladesOfChaos
                     Renderer renderer = renderers[i];
 
                     Debug.Log(
-                        "[BladesOfChaos DIAG] Renderer[" + i + "]='" +
+                        "[BladesOfChaos DIAG] Renderer[" + i + "]: " +
                         renderer.name +
-                        "', enabled=" + renderer.enabled +
+                        ", enabled=" + renderer.enabled +
                         ", active=" + renderer.gameObject.activeInHierarchy
                     );
                 }
@@ -340,21 +292,21 @@ namespace ULTRADROID.BladesOfChaos
                 if (meshFilters.Length == 0)
                 {
                     Debug.LogError(
-                        "[BladesOfChaos DIAG] MODEL HAS NO MESH FILTERS. " +
-                        "Inspect the GLB loader's mesh creation code."
+                        "[BladesOfChaos DIAG] No MeshFilters found. " +
+                        "Inspect the GLB loader's mesh creation."
                     );
                 }
                 else if (renderers.Length == 0)
                 {
                     Debug.LogError(
-                        "[BladesOfChaos DIAG] MESHES EXIST BUT NO RENDERERS."
+                        "[BladesOfChaos DIAG] Meshes exist, but no renderers were found."
                     );
                 }
                 else
                 {
-                    Debug.LogInfo(
+                    Debug.Log(
                         "[BladesOfChaos DIAG] MODEL CREATED. " +
-                        "Check visibility, scale, orientation, and materials in-game."
+                        "Check visibility, scale, orientation and materials."
                     );
                 }
             }
