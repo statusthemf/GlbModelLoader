@@ -3,49 +3,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using BepInEx;
-using BepInEx.Unity.IL2CPP;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 
 namespace ULTRADROID.Models
 {
-    [BepInPlugin(
-        "com.statusthemf.ultradroid.models",
-        "ULTRADROID Models API",
-        "0.1.1-diagnostic-no-json"
-    )]
-    public class ULTRADROIDModelsPlugin : BasePlugin
-    {
-        public override void Load()
-        {
-            Logger.LogInfo(
-                "[ULTRADROID Models API] DIAGNOSTIC BUILD MARKER: " +
-                "MODELS_API_DIAG_20261016_A"
-            );
-
-            Logger.LogInfo(
-                "[ULTRADROID Models API] Loaded. " +
-                "GLB loading is available to dependent mods."
-            );
-
-            Logger.LogInfo(
-                "[ULTRADROID Models API] ModelAPI.Version = " +
-                ModelAPI.Version
-            );
-
-            Logger.LogInfo(
-                "[ULTRADROID Models API] ModelAPI assembly = " +
-                typeof(ModelAPI).Assembly.FullName
-            );
-
-            Logger.LogWarning(
-                "[ULTRADROID Models API] Diagnostic build active. " +
-                "GLB parsing is being tested without JSON deserialization."
-            );
-        }
-    }
-
     public sealed class ModelLoadOptions
     {
         public string Name = "ULTRADROID_Model";
@@ -107,7 +69,7 @@ namespace ULTRADROID.Models
 
             Log("CHECKPOINT B: GLB parsing complete");
 
-            // The diagnostic Parse intentionally returns null.
+            // Diagnostic mode intentionally returns null from Parse().
             if (doc == null)
             {
                 Log("DIAGNOSTIC TEST COMPLETE: Parse returned null intentionally.");
@@ -928,7 +890,7 @@ namespace ULTRADROID.Models
                 "[ULTRADROID Models] Parse: JSON extracted; chars=" +
                 jsonText.Length);
 
-            // Diagnostic isolation test: no JSON deserialization.
+            // Diagnostic test: deliberately no JSON deserialization.
             Debug.Log(
                 "[ULTRADROID Models] TEST 1: before any JSON work");
 
