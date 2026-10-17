@@ -383,21 +383,16 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             }
 
             // Model placement and size.
-            // The model remains parented to the camera.
+            // The model remains parented to the camera
             var options = new ModelLoadOptions
             {
                 Name = "ULTRADROID_BladesOfChaos_DebugModel",
-
-                // Less rightward offset; move closer to the screen center.
-                Position = new Vector3(0.15f, -0.15f, 1.0f),
-
-                // Preserve the existing model orientation.
+    // Move the sword much farther down and closer to the center.
+                Position = new Vector3(0.05f, -0.65f, 1.0f),
                 RotationEuler = Vector3.zero,
+    // Much smaller: 3% of the model's original scale.
+                Scale = new Vector3(0.03f, 0.03f, 0.03f),
 
-                // Smaller model so more of the sword fits on screen.
-                Scale = new Vector3(0.07f, 0.07f, 0.07f),
-
-                // Keep the working texture loading enabled.
                 LoadTextures = true,
                 CreateColliders = false
             };
