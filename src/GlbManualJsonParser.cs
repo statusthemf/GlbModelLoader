@@ -1,3 +1,4 @@
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -622,13 +623,16 @@ namespace ULTRADROID.Models
                             baseColorFactor = Floats(
                                 Get(pbr, "baseColorFactor"),
                                 "baseColorFactor"),
+
                             metallicFactor = FloatValue(
                                 pbr, "metallicFactor", 1f),
+
                             roughnessFactor = FloatValue(
                                 pbr, "roughnessFactor", 1f)
                         };
 
-                        var baseTexture = Obj(Get(pbr, "baseColorTexture"));
+                        var baseTexture = Obj(
+                            Get(pbr, "baseColorTexture"));
 
                         if (baseTexture != null)
                         {
@@ -636,6 +640,22 @@ namespace ULTRADROID.Models
                             {
                                 index = Int(baseTexture, "index", -1)
                             };
+                        }
+
+                        // NEW: Parse the glTF metallic-roughness texture.
+                        var metallicRoughnessTexture = Obj(
+                            Get(pbr, "metallicRoughnessTexture"));
+
+                        if (metallicRoughnessTexture != null)
+                        {
+                            converted.metallicRoughnessTexture =
+                                new GltfTextureInfo
+                                {
+                                    index = Int(
+                                        metallicRoughnessTexture,
+                                        "index",
+                                        -1)
+                                };
                         }
 
                         material.pbrMetallicRoughness = converted;
@@ -720,4 +740,128 @@ namespace ULTRADROID.Models
             return root;
         }
     }
+}
+
+[Serializable]
+internal class GltfRoot
+{
+    public GltfAsset asset;
+    public int scene;
+    public GltfScene[] scenes;
+    public GltfNode[] nodes;
+    public GltfMesh[] meshes;
+    public GltfMaterial[] materials;
+    public GltfTexture[] textures;
+    public GltfImage[] images;
+    public GltfBufferView[] bufferViews;
+    public GltfAccessor[] accessors;
+}
+
+[Serializable]
+internal class GltfAsset
+{
+    public string version;
+}
+
+[Serializable]
+internal class GltfScene
+{
+    public int[] nodes;
+}
+
+[Serializable]
+internal class GltfNode
+{
+    public string name;
+    public int mesh = -1;
+    public int[] children;
+    public float[] translation;
+    public float[] rotation;
+    public float[] scale;
+    public float[] matrix;
+}
+
+[Serializable]
+internal class GltfMesh
+{
+    public string name;
+    public GltfPrimitive[] primitives;
+}
+
+[Serializable]
+internal class GltfPrimitive
+{
+    public GltfAttributes attributes;
+    public int indices = -1;
+    public int material = -1;
+    public int mode = 4;
+}
+
+[Serializable]
+internal class GltfAttributes
+{
+    public int POSITION = -1;
+    public int NORMAL = -1;
+    public int TANGENT = -1;
+    public int TEXCOORD_0 = -1;
+}
+
+[Serializable]
+internal class GltfMaterial
+{
+    public string name;
+    public PbrMetallicRoughness pbrMetallicRoughness;
+    public float[] emissiveFactor;
+}
+
+[Serializable]
+internal class PbrMetallicRoughness
+{
+    public float[] baseColorFactor;
+    public GltfTextureInfo baseColorTexture;
+
+    // NEW: Metallic-roughness texture reference.
+    public GltfTextureInfo metallicRoughnessTexture;
+
+    public float metallicFactor = 1f;
+    public float roughnessFactor = 1f;
+}
+
+[Serializable]
+internal class GltfTextureInfo
+{
+    public int index;
+}
+
+[Serializable]
+internal class GltfTexture
+{
+    public int source = -1;
+}
+
+[Serializable]
+internal class GltfImage
+{
+    public int bufferView = -1;
+    public string mimeType;
+}
+
+[Serializable]
+internal class GltfBufferView
+{
+    public int buffer;
+    public int byteOffset;
+    public int byteLength;
+    public int byteStride;
+}
+
+[Serializable]
+internal class GltfAccessor
+{
+    public int bufferView = -1;
+    public int byteOffset;
+    public int componentType;
+    public int count;
+    public string type;
+    public bool normalized;
 }
