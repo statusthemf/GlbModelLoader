@@ -1,158 +1,183 @@
 
 using System;
+using System.IO;
 using BepInEx;
+using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using ULTRADROID.Models;
 
-[BepInPlugin("com.statusthemf.weaponmodexample", "Weapon Mod Example", "1.0.0")]
-[BepInDependency("com.statusthemf.ultradroid.models", BepInDependency.DependencyFlags.HardDependency)]
+[BepInPlugin(
+    "com.statusthemf.glbmodelloader.example",
+    "GLB Model Loader Example",
+    "1.0.0")]
+[BepInDependency(
+    "com.statusthemf.ultradroid.models",
+    BepInDependency.DependencyFlags.HardDependency)]
 public sealed class WeaponModExample : BasePlugin
 {
+    internal static ManualLogSource ExampleLog;
+
     public override void Load()
     {
-        Log.LogInfo("[WeaponModExample] Loaded.");
-        AddComponent<WeaponModelRunner>();
+        ExampleLog = Log;
+        Log.LogInfo("[GLB Example] Plugin loaded.");
+
+        try
+        {
+            AddComponent<StandaloneModelRunner>();
+        }
+        catch (Exception ex)
+        {
+            Log.LogError("[GLB Example] Initialization failed: " + ex);
+        }
     }
 }
 
-public sealed class WeaponModelRunner : MonoBehaviour
+public sealed class StandaloneModelRunner : MonoBehaviour
 {
     private const float RetryInterval = 5f;
 
-    private sealed class WeaponConfig
-    {
-        public string TargetName;
-        public Vector3 LocalPosition;
-        public Vector3 LocalScale;
-        public bool FlipUV;
-        public bool Loaded;
-        public float NextAttemptTime;
+    private const string ModelFolder = "ULTRADROID.BladesOfChaos";
+    private const string KnifeFile = "blades_of_chaos_god.glb";
+    private const string AwpFile = "awp.glb";
 
-        public WeaponConfig(string targetName, Vector3 pos, Vector3 scale, bool flipUV)
-        {
-            TargetName = targetName;
-            LocalPosition = pos;
-            LocalScale = scale;
-            FlipUV = flipUV;
-        }
+    private float nextAttemptTime;
+    private string lastSceneName = "";
+    private bool modelsLoaded;
+
+    private GameObject knifeModel;
+    private GameObject awpModel;
+
+    public StandaloneModelRunner(IntPtr ptr) : base(ptr)
+    {
     }
 
-    private readonly WeaponConfig[] _configs =
+    private void Start()
     {
-        new WeaponConfig(
-            "Knife(Clone)",
-            new Vector3(0f, -0.65f, 1f),
-            new Vector3(0.03f, 0.03f, 0.03f),
-            true),
-
-        new WeaponConfig(
-            "AWP(Clone)",
-            new Vector3(-0.35f, -0.4f, 1.2f),
-            new Vector3(0.005f, 0.005f, 0.005f),
-            false),
-
-        // Add more weapon configurations here.
-    };
-
-    public WeaponModelRunner(IntPtr ptr) : base(ptr)
-    {
+        nextAttemptTime = Time.unscaledTime + 1f;
     }
 
     private void Update()
     {
-        for (int i = 0; i < _configs.Length; i++)
+        Scene scene = SceneManager.GetActiveScene();
+
+        if (!scene.isLoaded)
+            return;
+
+        if (scene.name != lastSceneName)
         {
-            WeaponConfig cfg = _configs[i];
+            lastSceneName = scene.name;
+            modelsLoaded = false;
+            nextAttemptTime = Time.unscaledTime + 1f;
+        }
 
-            if (cfg.Loaded)
-                continue;
+        if (modelsLoaded || Time.unscaledTime < nextAttemptTime)
+            return;
 
-            if (Time.unscaledTime < cfg.NextAttemptTime)
-                continue;
+        nextAttemptTime = Time.unscaledTime + RetryInterval;
 
-            GameObject weapon = FindWeapon(cfg.TargetName);
+        try
+        {
+            Camera camera = Camera.main;
 
-            // Keep checking until the target weapon exists.
-            if (weapon == null)
-                continue;
+            if (camera == null)
+                return;
 
-            cfg.NextAttemptTime = Time.unscaledTime + RetryInterval;
-
-            try
-            {
-                bool ok = LoadModelIntoWeapon(
-                    weapon,
-                    ResolveModelPath(cfg.TargetName),
-                    cfg.LocalPosition,
-                    cfg.LocalScale,
-                    cfg.FlipUV);
-
-                if (ok)
-                {
-                    cfg.Loaded = true;
-                    Debug.Log(
-                        "[ULTRADROID] Model attached: " + cfg.TargetName);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError(
-                    "[ULTRADROID] Model load failed for " +
-                    cfg.TargetName + ": " + ex);
-            }
+            LoadModels(camera);
+        }
+        catch (Exception ex)
+        {
+            ExampleLog.LogError("[GLB Example] Model loading failed: " + ex);
         }
     }
 
-    private static GameObject FindWeapon(string targetName)
+    private void LoadModels(Camera camera)
     {
-        GameObject[] all =
-            Resources.FindObjectsOfTypeAll<GameObject>();
+        string folder = Path.Combine(Paths.PluginPath, ModelFolder);
 
-        for (int i = 0; i < all.Length; i++)
+        string knifePath = Path.Combine(folder, KnifeFile);
+        string awpPath = Path.Combine(folder, AwpFile);
+
+        if (!File.Exists(knifePath))
         {
-            GameObject obj = all[i];
-
-            if (obj != null &&
-                obj.activeInHierarchy &&
-                obj.name == targetName)
-            {
-                return obj;
-            }
+            ExampleLog.LogError("[GLB Example] Knife file not found: " + knifePath);
+            return;
         }
 
-        return null;
-    }
+        if (!File.Exists(awpPath))
+        {
+            ExampleLog.LogError("[GLB Example] AWP file not found: " + awpPath);
+            return;
+        }
 
-    private static string ResolveModelPath(string targetName)
-    {
-        string fileName;
+        // Standalone model 1: centered.
+        ModelLoadOptions knifeOptions = new ModelLoadOptions
+        {
+            Name = "ULTRADROID_Example_Knife",
+            Position = new Vector3(0f, -0.65f, 1f),
+            RotationEuler = Vector3.zero,
+            Scale = new Vector3(0.03f, 0.03f, 0.03f),
+            LoadTextures = true,
+            CreateColliders = false
+        };
 
-        if (targetName == "Knife(Clone)")
-            fileName = "blades_of_chaos_god.glb";
-        else if (targetName == "AWP(Clone)")
-            fileName = "awp.glb";
-        else
-            throw new ArgumentException(
-                "No model path configured for " + targetName);
+        // Standalone model 2: tiny and to the left.
+        ModelLoadOptions awpOptions = new ModelLoadOptions
+        {
+            Name = "ULTRADROID_Example_AWP",
+            Position = new Vector3(-0.35f, -0.4f, 1.2f),
+            RotationEuler = Vector3.zero,
+            Scale = new Vector3(0.005f, 0.005f, 0.005f),
+            LoadTextures = true,
+            CreateColliders = false
+        };
 
-        return System.IO.Path.Combine(
-            Paths.PluginPath,
-            "ULTRADROID.BladesOfChaos",
-            fileName);
-    }
+        ExampleLog.LogInfo("[GLB Example] Loading knife model.");
 
-    // PLACEHOLDER: connect this method to the actual Models API.
-    private static bool LoadModelIntoWeapon(
-        GameObject weapon,
-        string modelPath,
-        Vector3 localPosition,
-        Vector3 localScale,
-        bool flipUV)
-    {
-        // The exact ModelAPI.LoadGLB call depends on your API's
-        // ModelLoadOptions and how it attaches models to a parent.
-        // Returning false means this example does not load anything yet.
-        return false;
+        knifeModel = ModelAPI.LoadGLB(
+            knifePath,
+            camera.transform,
+            knifeOptions);
+
+        if (knifeModel == null)
+        {
+            ExampleLog.LogError("[GLB Example] Knife loader returned null.");
+            return;
+        }
+
+        ExampleLog.LogInfo("[GLB Example] Knife model loaded.");
+
+        try
+        {
+            ExampleLog.LogInfo("[GLB Example] Loading AWP model.");
+
+            awpModel = ModelAPI.LoadGLB(
+                awpPath,
+                camera.transform,
+                awpOptions);
+
+            if (awpModel == null)
+            {
+                ExampleLog.LogError("[GLB Example] AWP loader returned null.");
+                Destroy(knifeModel);
+                knifeModel = null;
+                return;
+            }
+
+            ExampleLog.LogInfo("[GLB Example] AWP model loaded.");
+            modelsLoaded = true;
+        }
+        catch
+        {
+            if (knifeModel != null)
+            {
+                Destroy(knifeModel);
+                knifeModel = null;
+            }
+
+            throw;
+        }
     }
 }
