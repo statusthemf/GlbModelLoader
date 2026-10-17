@@ -401,7 +401,7 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
                     Position = new Vector3(0f, 0f, 2f),
                     RotationEuler = Vector3.zero,
                     Scale = new Vector3(0.1f, 0.1f, 0.1f),
-                    LoadTextures = false,
+                    LoadTextures = true,
                     CreateColliders = false
                 }
             );
