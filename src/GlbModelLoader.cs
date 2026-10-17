@@ -370,7 +370,8 @@ namespace ULTRADROID.Models
                             "_Metallic", pbr.metallicFactor);
                     }
 
-                    if (material.HasProperty("_Glossiness))
+                    // FIXED: closing quotation mark after _Glossiness.
+                    if (material.HasProperty("_Glossiness"))
                     {
                         material.SetFloat(
                             "_Glossiness",
