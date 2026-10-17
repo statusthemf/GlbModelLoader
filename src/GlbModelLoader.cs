@@ -20,19 +20,15 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.14-restored-conversion";
+        public const string Version = "0.1.15-clean";
 
         // UV TEST SWITCH: true = flip V (1 - v), false = use V as-is.
         private const bool FlipUvV = true;
 
-        private static readonly ManualLogSource DiagnosticLog =
+        // Single shared log source for the whole API.
+        internal static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
-                "ULTRADROID Models API Diagnostics");
-
-        private static void Log(string message)
-        {
-            DiagnosticLog.LogInfo("[ULTRADROID Models] " + message);
-        }
+                "ULTRADROID Models API");
 
         private static void LogError(string message, Exception ex)
         {
@@ -45,8 +41,6 @@ namespace ULTRADROID.Models
             Transform parent = null,
             ModelLoadOptions options = null)
         {
-            Log("LoadGLB ENTER");
-
             if (string.IsNullOrEmpty(path))
                 throw new ArgumentException(
                     "A GLB path is required.", "path");
@@ -57,11 +51,7 @@ namespace ULTRADROID.Models
 
             options = options ?? new ModelLoadOptions();
 
-            Log("Reading GLB: " + path);
-
             byte[] fileBytes = File.ReadAllBytes(path);
-
-            Log("File read complete. Bytes=" + fileBytes.Length);
 
             GlbDocument doc;
 
@@ -78,15 +68,6 @@ namespace ULTRADROID.Models
             if (doc == null || doc.json == null)
                 throw new InvalidDataException(
                     "GLB parser returned an empty document.");
-
-            Log("Document counts: nodes=" + Count(doc.json.nodes) +
-                ", meshes=" + Count(doc.json.meshes) +
-                ", accessors=" + Count(doc.json.accessors) +
-                ", bufferViews=" + Count(doc.json.bufferViews) +
-                ", materials=" + Count(doc.json.materials) +
-                ", textures=" + Count(doc.json.textures) +
-                ", images=" + Count(doc.json.images) +
-                ", binaryBytes=" + doc.binary.Length);
 
             GameObject root = new GameObject(
                 string.IsNullOrEmpty(options.Name)
@@ -115,8 +96,6 @@ namespace ULTRADROID.Models
                     materials,
                     options.CreateColliders);
 
-                Log("LoadGLB SUCCESS");
-
                 return root;
             }
             catch (Exception ex)
@@ -141,40 +120,20 @@ namespace ULTRADROID.Models
             int count = Count(doc.json.images);
             Texture2D[] result = new Texture2D[count];
 
-            Log("[TEXTURE DIAG] BuildTextures started.");
-            Log("[TEXTURE DIAG] Images=" + count +
-                ", enabled=" + load);
-
             if (!load || count == 0)
-            {
-                Log("[TEXTURE DIAG] Skipped. Enabled=" + load +
-                    ", imageCount=" + count);
                 return result;
-            }
 
             for (int i = 0; i < count; i++)
             {
                 GltfImage image = doc.json.images[i];
 
                 if (image == null)
-                {
-                    Log("[TEXTURE DIAG] Image " + i + " is null.");
                     continue;
-                }
-
-                Log("[TEXTURE DIAG] Image " + i +
-                    ": bufferView=" + image.bufferView +
-                    ", mimeType=" + (image.mimeType ?? "<null>"));
 
                 if (image.bufferView < 0 ||
                     doc.json.bufferViews == null ||
                     image.bufferView >= doc.json.bufferViews.Length)
-                {
-                    Log("[TEXTURE DIAG] Image " + i +
-                        " skipped: invalid bufferView. " +
-                        "Embedded GLB images only.");
                     continue;
-                }
 
                 byte[] bytes;
 
@@ -185,20 +144,13 @@ namespace ULTRADROID.Models
                 catch (Exception ex)
                 {
                     LogError(
-                        "[TEXTURE DIAG] Image " + i +
+                        "Image " + i +
                         ": failed to extract bytes.", ex);
                     continue;
                 }
 
                 if (bytes == null || bytes.Length == 0)
-                {
-                    Log("[TEXTURE DIAG] Image " + i +
-                        ": extracted image data is empty.");
                     continue;
-                }
-
-                Log("[TEXTURE DIAG] Image " + i +
-                    ": extracted " + bytes.Length + " bytes.");
 
                 Texture2D texture = null;
 
@@ -211,9 +163,6 @@ namespace ULTRADROID.Models
                         ImageConversion.LoadImage(
                             texture, bytes, false);
 
-                    Log("[TEXTURE DIAG] Image " + i +
-                        ": LoadImage returned " + loaded);
-
                     if (!loaded)
                     {
                         UnityEngine.Object.Destroy(texture);
@@ -225,25 +174,17 @@ namespace ULTRADROID.Models
                     texture.filterMode = FilterMode.Bilinear;
 
                     result[i] = texture;
-
-                    Log("[TEXTURE DIAG] Image " + i +
-                        ": loaded successfully; dimensions=" +
-                        texture.width + "x" + texture.height);
                 }
                 catch (Exception ex)
                 {
                     LogError(
-                        "[TEXTURE DIAG] Image " + i +
+                        "Image " + i +
                         ": texture creation or decoding failed.", ex);
 
                     if (texture != null)
                         UnityEngine.Object.Destroy(texture);
                 }
             }
-
-            Log("[TEXTURE DIAG] BuildTextures finished: " +
-                CountLoadedTextures(result) + "/" + count +
-                " images loaded.");
 
             return result;
         }
@@ -260,9 +201,6 @@ namespace ULTRADROID.Models
             Dictionary<string, Texture2D> convertedCache =
                 new Dictionary<string, Texture2D>();
 
-            Log("[MATERIAL DIAG] Starting. Materials=" + count +
-                ", loadedTextures=" + CountLoadedTextures(textures));
-
             Shader shader = Shader.Find("Standard");
 
             if (shader == null)
@@ -275,17 +213,12 @@ namespace ULTRADROID.Models
                 throw new InvalidOperationException(
                     "No compatible Unity shader was found.");
 
-            Log("[MATERIAL DIAG] Selected shader: " + shader.name);
-
             for (int i = 0; i < count; i++)
             {
                 GltfMaterial source = doc.json.materials[i];
 
                 if (source == null)
-                {
-                    Log("[MATERIAL DIAG] Material " + i + " is null.");
                     continue;
-                }
 
                 Material material = new Material(shader);
 
@@ -322,46 +255,24 @@ namespace ULTRADROID.Models
                         int imageIndex =
                             GetImageIndex(doc, textureIndex);
 
-                        Log("[MATERIAL DIAG] Material " + i +
-                            ": textureIndex=" + textureIndex +
-                            ", imageIndex=" + imageIndex);
-
                         if (imageIndex >= 0 &&
                             imageIndex < textures.Length &&
                             textures[imageIndex] != null)
                         {
                             Texture2D texture = textures[imageIndex];
-                            bool assigned = false;
 
                             if (material.HasProperty("_MainTex"))
                             {
                                 material.SetTexture(
                                     "_MainTex", texture);
-                                assigned = true;
                             }
 
                             if (material.HasProperty("_BaseMap"))
                             {
                                 material.SetTexture(
                                     "_BaseMap", texture);
-                                assigned = true;
                             }
-
-                            Log("[MATERIAL DIAG] Material " + i +
-                                ": texture=" + texture.name +
-                                ", shader=" + material.shader.name +
-                                ", assigned=" + assigned);
                         }
-                        else
-                        {
-                            Log("[MATERIAL DIAG] Material " + i +
-                                ": image index invalid or texture missing.");
-                        }
-                    }
-                    else
-                    {
-                        Log("[MATERIAL DIAG] Material " + i +
-                            ": no baseColorTexture defined.");
                     }
 
                     // Scalar fallback (used as-is when there is no
@@ -388,8 +299,6 @@ namespace ULTRADROID.Models
                             "_Smoothness", scalarSmoothness);
                     }
 
-                    bool metallicTextureAssigned = false;
-
                     if (pbr.metallicRoughnessTexture != null)
                     {
                         int mrTextureIndex =
@@ -403,35 +312,11 @@ namespace ULTRADROID.Models
                             mrImageIndex < textures.Length &&
                             textures[mrImageIndex] != null;
 
-                        Log("[METALLIC-ROUGHNESS] Material " + i +
-                            ": textureIndex=" + mrTextureIndex +
-                            ", imageIndex=" + mrImageIndex +
-                            ", found=" + found);
-
-                        // Only the Standard shader workflow is
-                        // implemented. URP Lit also has _MetallicGlossMap
-                        // but a different smoothness setup that has not
-                        // been verified here, so it is not touched.
                         bool standardWorkflow =
                             material.HasProperty("_MetallicGlossMap") &&
                             material.HasProperty("_GlossMapScale");
 
-                        if (!found)
-                        {
-                            Log("[METALLIC-ROUGHNESS] Material " + i +
-                                ": texture not available; using " +
-                                "scalar metallic/smoothness.");
-                        }
-                        else if (!standardWorkflow)
-                        {
-                            Log("[METALLIC-ROUGHNESS] Material " + i +
-                                ": shader " + material.shader.name +
-                                " does not use the Standard " +
-                                "_MetallicGlossMap/_GlossMapScale " +
-                                "layout; texture NOT assigned. " +
-                                "Using scalar metallic/smoothness.");
-                        }
-                        else
+                        if (found && standardWorkflow)
                         {
                             string cacheKey =
                                 mrImageIndex + "|" +
@@ -452,12 +337,7 @@ namespace ULTRADROID.Models
                                 convertedCache[cacheKey] = converted;
                             }
 
-                            bool convertedOk = converted != null;
-
-                            Log("[METALLIC-ROUGHNESS] Material " + i +
-                                ": converted=" + convertedOk);
-
-                            if (convertedOk)
+                            if (converted != null)
                             {
                                 try
                                 {
@@ -483,68 +363,26 @@ namespace ULTRADROID.Models
 
                                     material.EnableKeyword(
                                         "_METALLICGLOSSMAP");
-
-                                    metallicTextureAssigned = true;
-
-                                    Log("[METALLIC-ROUGHNESS] Material " +
-                                        i + ": assigned=true, texture=" +
-                                        converted.name);
                                 }
                                 catch (Exception ex)
                                 {
                                     LogError(
-                                        "[METALLIC-ROUGHNESS] Material " +
-                                        i + ": assignment failed.", ex);
+                                        "Material " + i +
+                                        ": metallic-gloss assignment failed.",
+                                        ex);
                                 }
-                            }
-                            else
-                            {
-                                Log("[METALLIC-ROUGHNESS] Material " + i +
-                                    ": assigned=false; using scalar " +
-                                    "metallic/smoothness.");
                             }
                         }
                     }
-                    else
-                    {
-                        Log("[METALLIC-ROUGHNESS] Material " + i +
-                            ": no metallicRoughnessTexture defined; " +
-                            "metallic=" + metallicFactor +
-                            ", smoothness=" + scalarSmoothness);
-                    }
-
-                    Log("[MATERIAL DIAG] Material " + i +
-                        ": metallicFactor=" + metallicFactor +
-                        ", roughnessFactor=" + roughnessFactor +
-                        ", metallicTextureAssigned=" +
-                        metallicTextureAssigned);
-                }
-                else
-                {
-                    Log("[MATERIAL DIAG] Material " + i +
-                        ": PBR data is missing.");
-                }
-
-                // Keep diagnostic emission disabled.
-                // Emissive-material support can be implemented separately.
-                if (material.HasProperty("_EmissionColor"))
-                {
-                    material.SetColor("_EmissionColor", Color.black);
-                    material.DisableKeyword("_EMISSION");
                 }
 
                 result[i] = material;
-
-                Log("[MATERIAL DIAG] Material " + i +
-                    " ready: " + material.name);
             }
 
             result[count] = new Material(shader)
             {
                 name = "GLTF_Default_Material"
             };
-
-            Log("[MATERIAL DIAG] Created fallback material.");
 
             return result;
         }
@@ -562,7 +400,8 @@ namespace ULTRADROID.Models
         {
             if (source == null)
             {
-                Log("[METALLIC-ROUGHNESS] Convert: source is null.");
+                LogError(
+                    "Metallic-roughness convert: source is null.", null);
                 return null;
             }
 
@@ -573,8 +412,9 @@ namespace ULTRADROID.Models
 
                 if (width <= 0 || height <= 0)
                 {
-                    Log("[METALLIC-ROUGHNESS] Convert: invalid size " +
-                        width + "x" + height);
+                    LogError(
+                        "Metallic-roughness convert: invalid size " +
+                        width + "x" + height, null);
                     return null;
                 }
 
@@ -582,8 +422,9 @@ namespace ULTRADROID.Models
 
                 if (sourcePixels == null || sourcePixels.Length == 0)
                 {
-                    Log("[METALLIC-ROUGHNESS] Convert: no pixels read " +
-                        "(texture may not be readable).");
+                    LogError(
+                        "Metallic-roughness convert: no pixels read " +
+                        "(texture may not be readable).", null);
                     return null;
                 }
 
@@ -627,61 +468,16 @@ namespace ULTRADROID.Models
                 converted.SetPixels32(convertedPixels);
                 converted.Apply(true, false);
 
-                // DIAGNOSTIC: sample the converted texture's first pixels
-                // to confirm the restored conversion ran.
-                Color32[] pixels = converted.GetPixels32();
-
-                int count = Math.Min(pixels.Length, 1000);
-                long metallicTotal = 0;
-                long smoothnessTotal = 0;
-
-                for (int i = 0; i < count; i++)
-                {
-                    metallicTotal += pixels[i].r;
-                    smoothnessTotal += pixels[i].a;
-                }
-
-                if (count > 0)
-                {
-                    Log("[ULTRADROID METALLIC DIAG] " +
-                        "Samples=" + count +
-                        ", average metallic=" +
-                        (metallicTotal / (float)count / 255f)
-                            .ToString("F3") +
-                        ", average smoothness=" +
-                        (smoothnessTotal / (float)count / 255f)
-                            .ToString("F3"));
-                }
-
-                Log("[METALLIC-ROUGHNESS] Convert OK: " +
-                    converted.name + " " + width + "x" + height);
-
                 return converted;
             }
             catch (Exception ex)
             {
                 LogError(
-                    "[METALLIC-ROUGHNESS] Texture conversion failed " +
-                    "for " + source.name, ex);
+                    "Metallic-roughness conversion failed for " +
+                    source.name, ex);
 
                 return null;
             }
-        }
-
-        private static int CountLoadedTextures(Texture2D[] textures)
-        {
-            int count = 0;
-
-            if (textures == null)
-                return 0;
-
-            for (int i = 0; i < textures.Length; i++)
-            {
-                if (textures[i] != null)
-                    count++;
-            }
-
-            return count;
         }
 
         private static int GetImageIndex(
@@ -691,24 +487,13 @@ namespace ULTRADROID.Models
             if (doc.json.textures == null ||
                 textureIndex < 0 ||
                 textureIndex >= doc.json.textures.Length)
-            {
-                Log("[MATERIAL DIAG] Invalid texture index: " +
-                    textureIndex);
                 return -1;
-            }
 
             GltfTexture texture =
                 doc.json.textures[textureIndex];
 
             if (texture == null)
-            {
-                Log("[MATERIAL DIAG] Texture entry " +
-                    textureIndex + " is null.");
                 return -1;
-            }
-
-            Log("[MATERIAL DIAG] Texture " + textureIndex +
-                " references image " + texture.source);
 
             return texture.source;
         }
@@ -721,10 +506,7 @@ namespace ULTRADROID.Models
         {
             if (doc.json.nodes == null ||
                 doc.json.nodes.Length == 0)
-            {
-                Log("No nodes found in glTF scene.");
                 return;
-            }
 
             int sceneIndex = doc.json.scene;
             int[] roots = null;
@@ -773,8 +555,6 @@ namespace ULTRADROID.Models
 
                 roots = inferredRoots.ToArray();
             }
-
-            Log("[SCENE DIAG] Root node count=" + roots.Length);
 
             HashSet<int> recursionGuard =
                 new HashSet<int>();
@@ -828,9 +608,6 @@ namespace ULTRADROID.Models
 
                 if (mesh != null)
                 {
-                    Log("[SCENE DIAG] Node " + index +
-                        " uses mesh " + node.mesh);
-
                     BuildMesh(
                         doc,
                         mesh,
@@ -970,55 +747,6 @@ namespace ULTRADROID.Models
                             primitive.attributes.TEXCOORD_0);
                 }
 
-                Log("[MESH DIAG] Mesh=" + source.name +
-                    ", vertices=" + primitiveVertices.Length +
-                    ", normals=" +
-                    (primitiveNormals == null
-                        ? 0
-                        : primitiveNormals.Length) +
-                    ", UVs=" +
-                    (primitiveUv == null
-                        ? 0
-                        : primitiveUv.Length) +
-                    ", materialIndex=" + primitive.material);
-
-                if (primitiveUv != null &&
-                    primitiveUv.Length > 0)
-                {
-                    Vector2 minUv = primitiveUv[0];
-                    Vector2 maxUv = primitiveUv[0];
-                    bool finiteUv = true;
-
-                    for (int i = 0; i < primitiveUv.Length; i++)
-                    {
-                        Vector2 value = primitiveUv[i];
-
-                        if (float.IsNaN(value.x) ||
-                            float.IsNaN(value.y) ||
-                            float.IsInfinity(value.x) ||
-                            float.IsInfinity(value.y))
-                        {
-                            finiteUv = false;
-                        }
-
-                        minUv = Vector2.Min(minUv, value);
-                        maxUv = Vector2.Max(maxUv, value);
-                    }
-
-                    Log("[UV DIAG] Mesh=" + source.name +
-                        ", count=" + primitiveUv.Length +
-                        ", min=(" + minUv.x + ", " + minUv.y + ")" +
-                        ", max=(" + maxUv.x + ", " + maxUv.y + ")" +
-                        ", first=(" + primitiveUv[0].x + ", " +
-                        primitiveUv[0].y + ")" +
-                        ", finite=" + finiteUv);
-                }
-                else
-                {
-                    Log("[UV DIAG] Mesh=" + source.name +
-                        " has no TEXCOORD_0 data.");
-                }
-
                 int vertexOffset = vertices.Count;
                 vertices.AddRange(primitiveVertices);
 
@@ -1079,10 +807,6 @@ namespace ULTRADROID.Models
                         : materials.Length - 1;
 
                 submeshMaterials.Add(materials[materialIndex]);
-
-                Log("[MESH DIAG] Selected material slot=" +
-                    materialIndex + ", name=" +
-                    materials[materialIndex].name);
             }
 
             if (vertices.Count == 0)
@@ -1132,9 +856,6 @@ namespace ULTRADROID.Models
             }
             else
             {
-                Log("[MESH DIAG] Normals missing or incomplete; " +
-                    "recalculating normals.");
-
                 mesh.RecalculateNormals();
             }
 
@@ -1155,14 +876,6 @@ namespace ULTRADROID.Models
                 }
 
                 mesh.SetUVs(0, il2CppUv);
-
-                Log("[MESH DIAG] UV coordinates applied. FlipUvV=" +
-                    FlipUvV + ", Count=" + uv.Count);
-            }
-            else
-            {
-                Log("[MESH DIAG] UV coordinates missing or incomplete. " +
-                    "Texture mapping may not work.");
             }
 
             mesh.RecalculateBounds();
@@ -1178,33 +891,6 @@ namespace ULTRADROID.Models
             renderer.sharedMaterials =
                 new Il2CppReferenceArray<Material>(
                     submeshMaterials.ToArray());
-
-            Log("[MESH DIAG] Renderer created. Mesh=" + mesh.name +
-                ", submeshes=" + mesh.subMeshCount +
-                ", materialSlots=" + submeshMaterials.Count);
-
-            for (int i = 0; i < submeshMaterials.Count; i++)
-            {
-                Material material = submeshMaterials[i];
-
-                Texture mainTexture = material != null
-                    ? material.mainTexture
-                    : null;
-
-                Log("[TEXTURE TEST] Submesh=" + i +
-                    ", material=" +
-                    (material != null ? material.name : "NULL") +
-                    ", shader=" +
-                    (material != null && material.shader != null
-                        ? material.shader.name
-                        : "NULL") +
-                    ", mainTexture=" +
-                    (mainTexture != null ? mainTexture.name : "NULL") +
-                    ", textureSize=" +
-                    (mainTexture != null
-                        ? mainTexture.width + "x" + mainTexture.height
-                        : "N/A"));
-            }
 
             if (colliders)
             {
@@ -1231,15 +917,8 @@ namespace ULTRADROID.Models
         internal GltfRoot json;
         internal byte[] binary;
 
-        private static readonly ManualLogSource ParserLog =
-            BepInEx.Logging.Logger.CreateLogSource(
-                "ULTRADROID Models GLB Parser");
-
         internal static GlbDocument Parse(byte[] file)
         {
-            LogParse("Parse ENTER; bytes=" +
-                (file == null ? -1 : file.Length));
-
             if (file == null || file.Length < 20)
                 throw new InvalidDataException(
                     "File is too small to be a GLB.");
@@ -1264,7 +943,6 @@ namespace ULTRADROID.Models
             byte[] binBytes = null;
 
             int position = 12;
-            int chunkNumber = 0;
 
             while (position + 8 <= file.Length)
             {
@@ -1278,10 +956,6 @@ namespace ULTRADROID.Models
                     throw new InvalidDataException(
                         "GLB chunk exceeds file length.");
                 }
-
-                LogParse("Chunk " + chunkNumber +
-                    ": type=0x" + chunkType.ToString("X8") +
-                    ", bytes=" + chunkLength);
 
                 if (chunkType == 0x4E4F534A)
                 {
@@ -1299,7 +973,6 @@ namespace ULTRADROID.Models
                 }
 
                 position += (int)chunkLength;
-                chunkNumber++;
             }
 
             if (jsonBytes == null)
@@ -1310,18 +983,16 @@ namespace ULTRADROID.Models
                 Encoding.UTF8.GetString(jsonBytes)
                     .TrimEnd('\0', ' ', '\r', '\n', '\t');
 
-            LogParse("JSON extracted; chars=" + jsonText.Length);
-
             GltfRoot root;
 
             try
             {
-                LogParse("Parsing glTF JSON with manual parser.");
                 root = GlbManualJsonParser.ParseRoot(jsonText);
             }
             catch (Exception ex)
             {
-                LogParseError("Manual JSON parsing failed", ex);
+                ModelAPI.DiagnosticLog.LogError(
+                    "[ULTRADROID Models] Manual JSON parsing failed\n" + ex);
                 throw;
             }
 
@@ -1338,26 +1009,11 @@ namespace ULTRADROID.Models
                     "Missing or unsupported glTF asset version.");
             }
 
-            LogParse("JSON parsed. Nodes=" + Count(root.nodes) +
-                ", meshes=" + Count(root.meshes) +
-                ", accessors=" + Count(root.accessors) +
-                ", binaryBytes=" + binBytes.Length);
-
             return new GlbDocument
             {
                 json = root,
                 binary = binBytes
             };
-        }
-
-        private static void LogParse(string message)
-        {
-            ParserLog.LogInfo("[GLB PARSER] " + message);
-        }
-
-        private static void LogParseError(string message, Exception ex)
-        {
-            ParserLog.LogError("[GLB PARSER] " + message + "\n" + ex);
         }
 
         internal byte[] ReadBufferView(int index)
@@ -1603,11 +1259,6 @@ namespace ULTRADROID.Models
 
             throw new InvalidDataException(
                 "Unsupported accessor type: " + type);
-        }
-
-        private static int Count<T>(T[] array)
-        {
-            return array == null ? 0 : array.Length;
         }
 
         private static uint ReadU32(byte[] bytes, int offset)
