@@ -1,3 +1,4 @@
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -20,7 +21,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.6-emission-test";
+        public const string Version = "0.1.7-uv-flip-test";
 
         private static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
@@ -381,10 +382,8 @@ namespace ULTRADROID.Models
                         ": PBR data is missing.");
                 }
 
-                // TEMPORARY DIAGNOSTIC:
-                // Disable emission so we can test whether it is
-                // washing out the base-color texture.
-                // Do not modify the GLB's UVs or texture assignment.
+                // Keep the diagnostic emission fix:
+                // emission is disabled while testing the base texture.
                 if (material.HasProperty("_EmissionColor"))
                 {
                     material.SetColor(
@@ -926,16 +925,17 @@ namespace ULTRADROID.Models
 
                 foreach (Vector2 coordinate in uv)
                 {
+                    // TEMPORARY UV TEST: flip V only.
                     il2CppUv.Add(new Vector4(
                         coordinate.x,
-                        coordinate.y,
+                        1f - coordinate.y,
                         0f,
                         0f));
                 }
 
                 mesh.SetUVs(0, il2CppUv);
 
-                Log("[MESH DIAG] UV coordinates applied. Count=" +
+                Log("[MESH DIAG] UV coordinates applied with V flip. Count=" +
                     uv.Count);
             }
             else
