@@ -1,3 +1,4 @@
+
 using System;
 using System.IO;
 using BepInEx;
@@ -9,8 +10,8 @@ using ULTRADROID.Models;
 
 [BepInPlugin(
     "com.statusthemf.ultradroid.bladesofchaos",
-    "ULTRADROID Blades of Chaos",
-    "0.5.0"
+    "ULTRADROID Model Test",
+    "0.6.0"
 )]
 [BepInDependency(
     "com.statusthemf.ultradroid.models",
@@ -27,10 +28,11 @@ public sealed class BladesOfChaosPlugin : BasePlugin
         try
         {
             AddComponent<BladesOfChaosRunner>();
+            Log.LogInfo("[ULTRADROID Model Test] Plugin loaded.");
         }
         catch (Exception ex)
         {
-            Log.LogError("[BladesOfChaos] Plugin initialization failed:");
+            Log.LogError("[ULTRADROID Model Test] Initialization failed:");
             Log.LogError(ex.ToString());
         }
     }
@@ -42,7 +44,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     private float nextModelAttempt = -1f;
 
     private string lastSceneName;
-    private bool modelLoaded;
+    private bool modelsLoaded;
 
     public BladesOfChaosRunner(IntPtr ptr) : base(ptr)
     {
@@ -56,7 +58,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         }
         catch (Exception ex)
         {
-            LogError("[BladesOfChaos] Initial scene check failed:");
+            LogError("[ULTRADROID Model Test] Initial scene check failed:");
             LogError(ex.ToString());
         }
     }
@@ -75,22 +77,20 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             }
             catch (Exception ex)
             {
-                LogError("[BladesOfChaos] Scene polling failed:");
+                LogError("[ULTRADROID Model Test] Scene check failed:");
                 LogError(ex.ToString());
             }
         }
 
         if (nextModelAttempt >= 0f &&
             now >= nextModelAttempt &&
-            !modelLoaded)
+            !modelsLoaded)
         {
             nextModelAttempt = -1f;
 
-            bool success = TryLoadModel();
-
-            if (success)
+            if (TryLoadModels())
             {
-                modelLoaded = true;
+                modelsLoaded = true;
             }
             else
             {
@@ -99,7 +99,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         }
     }
 
-    private void CheckScene(bool forceLog)
+    private void CheckScene(bool forceCheck)
     {
         Scene scene = SceneManager.GetActiveScene();
         string sceneName = scene.name ?? "";
@@ -110,21 +110,22 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             StringComparison.Ordinal
         );
 
-        if (!forceLog && !changed)
+        if (!forceCheck && !changed)
             return;
 
         lastSceneName = sceneName;
         nextModelAttempt = -1f;
 
         if (changed)
-            modelLoaded = false;
+            modelsLoaded = false;
 
         if (!IsGameplayScene(sceneName, scene.isLoaded))
             return;
 
-        if (modelLoaded)
+        if (modelsLoaded)
             return;
 
+        // Allow the gameplay camera time to initialize.
         nextModelAttempt = Time.unscaledTime + 5f;
     }
 
@@ -144,17 +145,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         string[] excluded =
         {
-            "intro",
-            "bootstrap",
-            "mainmenu",
-            "main_menu",
-            "menu",
-            "loading",
-            "loader",
-            "credits",
-            "options",
-            "settings",
-            "title"
+            "intro", "bootstrap", "mainmenu", "main_menu",
+            "menu", "loading", "loader", "credits",
+            "options", "settings", "title"
         };
 
         foreach (string word in excluded)
@@ -174,21 +167,16 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         }
 
         string upper = sceneName.ToUpperInvariant();
-
-        if (upper.Contains("P-1") || upper.Contains("P-2"))
-            return true;
-
-        return false;
+        return upper.Contains("P-1") || upper.Contains("P-2");
     }
 
-    private bool TryLoadModel()
+    private bool TryLoadModels()
     {
         try
         {
             Scene scene = SceneManager.GetActiveScene();
-            string sceneName = scene.name ?? "";
 
-            if (!IsGameplayScene(sceneName, scene.isLoaded))
+            if (!IsGameplayScene(scene.name ?? "", scene.isLoaded))
                 return false;
 
             Camera camera = Camera.main;
@@ -198,7 +186,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
             if (camera == null)
             {
-                LogWarning("[BladesOfChaos] No camera found.");
+                LogWarning("[ULTRADROID Model Test] No camera found.");
                 return false;
             }
 
@@ -207,50 +195,79 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 "ULTRADROID.BladesOfChaos"
             );
 
-            string path = Path.Combine(
+            string swordPath = Path.Combine(
                 folder,
                 "blades_of_chaos_god.glb"
             );
 
-            if (!File.Exists(path))
+            string awpPath = Path.Combine(folder, "awp.glb");
+
+            if (!File.Exists(swordPath))
             {
-                LogWarning(
-                    "[BladesOfChaos] GLB file was not found: " + path);
+                LogWarning("[ULTRADROID Model Test] Missing file: " + swordPath);
                 return false;
             }
 
-            var options = new ModelLoadOptions
+            if (!File.Exists(awpPath))
+            {
+                LogWarning("[ULTRADROID Model Test] Missing file: " + awpPath);
+                return false;
+            }
+
+            var swordOptions = new ModelLoadOptions
             {
                 Name = "ULTRADROID_BladesOfChaos",
                 Position = new Vector3(0.05f, -0.65f, 1.0f),
                 RotationEuler = Vector3.zero,
                 Scale = new Vector3(0.03f, 0.03f, 0.03f),
-
                 LoadTextures = true,
                 CreateColliders = false,
-
-                // This model uses its own UV V-flip setting.
                 FlipUvV = true
             };
 
-            GameObject result = ModelAPI.LoadGLB(
-                path,
+            var awpOptions = new ModelLoadOptions
+            {
+                Name = "ULTRADROID_AWP",
+                Position = new Vector3(0.35f, -0.4f, 1.2f),
+                RotationEuler = Vector3.zero,
+                Scale = new Vector3(0.03f, 0.03f, 0.03f),
+                LoadTextures = true,
+                CreateColliders = false,
+                FlipUvV = false
+            };
+
+            GameObject sword = ModelAPI.LoadGLB(
+                swordPath,
                 camera.transform,
-                options
+                swordOptions
             );
 
-            if (result == null)
+            if (sword == null)
             {
-                LogError("[BladesOfChaos] LoadGLB returned null.");
+                LogError("[ULTRADROID Model Test] Sword model failed to load.");
                 return false;
             }
 
-            Log("[BladesOfChaos] Model loaded: " + result.name);
+            GameObject awp = ModelAPI.LoadGLB(
+                awpPath,
+                camera.transform,
+                awpOptions
+            );
+
+            if (awp == null)
+            {
+                // Avoid leaving a partially loaded test model behind.
+                UnityEngine.Object.Destroy(sword);
+                LogError("[ULTRADROID Model Test] AWP model failed to load.");
+                return false;
+            }
+
+            Log("[ULTRADROID Model Test] Both models loaded successfully.");
             return true;
         }
         catch (Exception ex)
         {
-            LogError("[BladesOfChaos] Model loading failed:");
+            LogError("[ULTRADROID Model Test] Model loading failed:");
             LogError(ex.ToString());
             return false;
         }
