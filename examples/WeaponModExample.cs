@@ -138,7 +138,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             _modelRoot.name = "ULTRADROID_BladesOfChaos";
 
             _modelRoot.transform.localPosition =
-                new Vector3(0f, 0f, 0f);
+                new Vector3(0f, 0f, 1f);
 
             _modelRoot.transform.localRotation = Quaternion.identity;
 
