@@ -1,293 +1,89 @@
+private const float RetryInterval = 5f;
 
-using System;
-using System.IO;
-using BepInEx;
-using BepInEx.Logging;
-using BepInEx.Unity.IL2CPP;
-using UnityEngine;
-using UnityEngine.SceneManagement;
-using ULTRADROID.Models;
-
-[BepInPlugin(
-    "com.statusthemf.ultradroid.bladesofchaos",
-    "ULTRADROID Model Test",
-    "0.6.0"
-)]
-[BepInDependency(
-    "com.statusthemf.ultradroid.models",
-    BepInDependency.DependencyFlags.HardDependency
-)]
-public sealed class BladesOfChaosPlugin : BasePlugin
+// Per-weapon model config
+private sealed class WeaponConfig
 {
-    internal static ManualLogSource DiagLog;
+    public string TargetName;
+    public Vector3 LocalPosition;
+    public Vector3 LocalScale;
+    public bool FlipUV;
+    public bool Loaded;
+    public float NextAttemptTime;
 
-    public override void Load()
+    public WeaponConfig(string targetName, Vector3 pos, Vector3 scale, bool flipUV)
     {
-        DiagLog = Log;
+        TargetName = targetName;
+        LocalPosition = pos;
+        LocalScale = scale;
+        FlipUV = flipUV;
+    }
+}
+
+private readonly WeaponConfig[] _configs =
+{
+    new WeaponConfig("Knife(Clone)",          new Vector3( 0f,    -0.65f, 1f),   new Vector3(0.03f,  0.03f,  0.03f), true),
+    new WeaponConfig("AWP(Clone)",            new Vector3(-0.35f, -0.4f,  1.2f), new Vector3(0.005f, 0.005f, 0.005f), false),
+    // add more here
+};
+
+private void Update()
+{
+    for (int i = 0; i < _configs.Length; i++)
+    {
+        WeaponConfig cfg = _configs[i];
+        if (cfg.Loaded)
+            continue;
+
+        if (Time.unscaledTime < cfg.NextAttemptTime)
+            continue;
+
+        // Only schedule the next attempt if we actually *tried* (weapon existed).
+        GameObject weapon = FindWeapon(cfg.TargetName);
+        if (weapon == null)
+            continue;
+
+        cfg.NextAttemptTime = Time.unscaledTime + RetryInterval;
 
         try
         {
-            AddComponent<BladesOfChaosRunner>();
-            Log.LogInfo("[ULTRADROID Model Test] Plugin loaded.");
+            // Swap this for your actual Models API call.
+            // Arguments here mirror what the Blades of Chaos plugin does.
+            bool ok = LoadModelIntoWeapon(
+                weapon,
+                modelPath: ResolveModelPath(cfg.TargetName),
+                localPosition: cfg.LocalPosition,
+                localScale: cfg.LocalScale,
+                flipUV: cfg.FlipUV);
+
+            if (ok)
+            {
+                cfg.Loaded = true;
+                Debug.Log($"[ULTRADROID] Model attached: {cfg.TargetName}");
+            }
         }
         catch (Exception ex)
         {
-            Log.LogError("[ULTRADROID Model Test] Initialization failed:");
-            Log.LogError(ex.ToString());
+            Debug.LogError($"[ULTRADROID] Model load failed for {cfg.TargetName}: {ex}");
         }
     }
 }
 
-public sealed class BladesOfChaosRunner : MonoBehaviour
+private static GameObject FindWeapon(string targetName)
 {
-    private float nextSceneCheck;
-    private float nextModelAttempt = -1f;
-
-    private string lastSceneName;
-    private bool modelsLoaded;
-
-    public BladesOfChaosRunner(IntPtr ptr) : base(ptr)
+    GameObject[] all = Resources.FindObjectsOfTypeAll<GameObject>();
+    for (int i = 0; i < all.Length; i++)
     {
+        GameObject obj = all[i];
+        if (obj != null && obj.activeInHierarchy && obj.name == targetName)
+            return obj;
     }
+    return null;
+}
 
-    public void Start()
-    {
-        try
-        {
-            CheckScene(true);
-        }
-        catch (Exception ex)
-        {
-            LogError("[ULTRADROID Model Test] Initial scene check failed:");
-            LogError(ex.ToString());
-        }
-    }
-
-    public void Update()
-    {
-        float now = Time.unscaledTime;
-
-        if (now >= nextSceneCheck)
-        {
-            nextSceneCheck = now + 1f;
-
-            try
-            {
-                CheckScene(false);
-            }
-            catch (Exception ex)
-            {
-                LogError("[ULTRADROID Model Test] Scene check failed:");
-                LogError(ex.ToString());
-            }
-        }
-
-        if (nextModelAttempt >= 0f &&
-            now >= nextModelAttempt &&
-            !modelsLoaded)
-        {
-            nextModelAttempt = -1f;
-
-            if (TryLoadModels())
-            {
-                modelsLoaded = true;
-            }
-            else
-            {
-                nextModelAttempt = Time.unscaledTime + 5f;
-            }
-        }
-    }
-
-    private void CheckScene(bool forceCheck)
-    {
-        Scene scene = SceneManager.GetActiveScene();
-        string sceneName = scene.name ?? "";
-
-        bool changed = !string.Equals(
-            lastSceneName,
-            sceneName,
-            StringComparison.Ordinal
-        );
-
-        if (!forceCheck && !changed)
-            return;
-
-        lastSceneName = sceneName;
-        nextModelAttempt = -1f;
-
-        if (changed)
-            modelsLoaded = false;
-
-        if (!IsGameplayScene(sceneName, scene.isLoaded))
-            return;
-
-        if (modelsLoaded)
-            return;
-
-        // Allow the gameplay camera time to initialize.
-        nextModelAttempt = Time.unscaledTime + 5f;
-    }
-
-    private bool IsGameplayScene(string sceneName, bool isLoaded)
-    {
-        if (!isLoaded || string.IsNullOrWhiteSpace(sceneName))
-            return false;
-
-        if (sceneName.Equals(
-            "uk_construct",
-            StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        string lower = sceneName.ToLowerInvariant();
-
-        string[] excluded =
-        {
-            "intro", "bootstrap", "mainmenu", "main_menu",
-            "menu", "loading", "loader", "credits",
-            "options", "settings", "title"
-        };
-
-        foreach (string word in excluded)
-        {
-            if (lower.Contains(word))
-                return false;
-        }
-
-        for (int i = 0; i + 2 < sceneName.Length; i++)
-        {
-            if (char.IsDigit(sceneName[i]) &&
-                sceneName[i + 1] == '-' &&
-                char.IsDigit(sceneName[i + 2]))
-            {
-                return true;
-            }
-        }
-
-        string upper = sceneName.ToUpperInvariant();
-        return upper.Contains("P-1") || upper.Contains("P-2");
-    }
-
-    private bool TryLoadModels()
-    {
-        try
-        {
-            Scene scene = SceneManager.GetActiveScene();
-
-            if (!IsGameplayScene(scene.name ?? "", scene.isLoaded))
-                return false;
-
-            Camera camera = Camera.main;
-
-            if (camera == null)
-                camera = UnityEngine.Object.FindObjectOfType<Camera>();
-
-            if (camera == null)
-            {
-                LogWarning("[ULTRADROID Model Test] No camera found.");
-                return false;
-            }
-
-            string folder = Path.Combine(
-                Paths.PluginPath,
-                "ULTRADROID.BladesOfChaos"
-            );
-
-            string swordPath = Path.Combine(
-                folder,
-                "blades_of_chaos_god.glb"
-            );
-
-            string awpPath = Path.Combine(folder, "awp.glb");
-
-            if (!File.Exists(swordPath))
-            {
-                LogWarning("[ULTRADROID Model Test] Missing file: " + swordPath);
-                return false;
-            }
-
-            if (!File.Exists(awpPath))
-            {
-                LogWarning("[ULTRADROID Model Test] Missing file: " + awpPath);
-                return false;
-            }
-
-            var swordOptions = new ModelLoadOptions
-            {
-                Name = "ULTRADROID_BladesOfChaos",
-                Position = new Vector3(0.05f, -0.65f, 1.0f),
-                RotationEuler = Vector3.zero,
-                Scale = new Vector3(0.03f, 0.03f, 0.03f),
-                LoadTextures = true,
-                CreateColliders = false,
-                FlipUvV = true
-            };
-
-            var awpOptions = new ModelLoadOptions
-            {
-                Name = "ULTRADROID_AWP",
-                Position = new Vector3(0.35f, -0.4f, 1.2f),
-                RotationEuler = Vector3.zero,
-                Scale = new Vector3(0.03f, 0.03f, 0.03f),
-                LoadTextures = true,
-                CreateColliders = false,
-                FlipUvV = false
-            };
-
-            GameObject sword = ModelAPI.LoadGLB(
-                swordPath,
-                camera.transform,
-                swordOptions
-            );
-
-            if (sword == null)
-            {
-                LogError("[ULTRADROID Model Test] Sword model failed to load.");
-                return false;
-            }
-
-            GameObject awp = ModelAPI.LoadGLB(
-                awpPath,
-                camera.transform,
-                awpOptions
-            );
-
-            if (awp == null)
-            {
-                // Avoid leaving a partially loaded test model behind.
-                UnityEngine.Object.Destroy(sword);
-                LogError("[ULTRADROID Model Test] AWP model failed to load.");
-                return false;
-            }
-
-            Log("[ULTRADROID Model Test] Both models loaded successfully.");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogError("[ULTRADROID Model Test] Model loading failed:");
-            LogError(ex.ToString());
-            return false;
-        }
-    }
-
-    private static void Log(string message)
-    {
-        if (BladesOfChaosPlugin.DiagLog != null)
-            BladesOfChaosPlugin.DiagLog.LogInfo(message);
-    }
-
-    private static void LogWarning(string message)
-    {
-        if (BladesOfChaosPlugin.DiagLog != null)
-            BladesOfChaosPlugin.DiagLog.LogWarning(message);
-    }
-
-    private static void LogError(string message)
-    {
-        if (BladesOfChaosPlugin.DiagLog != null)
-            BladesOfChaosPlugin.DiagLog.LogError(message);
-    }
+// Placeholder — replace with your real Models API entry point.
+private static bool LoadModelIntoWeapon(GameObject weapon, string modelPath,
+    Vector3 localPosition, Vector3 localScale, bool flipUV)
+{
+    // e.g. return ULTRADROID.Models.Load(weapon, modelPath, localPosition, localScale, flipUV);
+    return false;
 }
