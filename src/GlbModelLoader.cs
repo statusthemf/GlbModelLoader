@@ -20,7 +20,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.13-emission-diag";
+        public const string Version = "0.1.14-restored-conversion";
 
         // UV TEST SWITCH: true = flip V (1 - v), false = use V as-is.
         private const bool FlipUvV = true;
@@ -525,34 +525,12 @@ namespace ULTRADROID.Models
                         ": PBR data is missing.");
                 }
 
-                // DIAGNOSTIC (0.1.13): force bright magenta emission to
-                // verify the shader is actually reading material
-                // properties. Restore the original block after testing.
-                //
-                // Original behaviour (commented out):
-                //   if (material.HasProperty("_EmissionColor"))
-                //   {
-                //       material.SetColor("_EmissionColor", Color.black);
-                //       material.DisableKeyword("_EMISSION");
-                //       Log("[EMISSION TEST] Material " + i +
-                //           ": emission disabled; source emissiveFactor=" +
-                //           (source.emissiveFactor == null
-                //               ? "<null>"
-                //               : string.Join(",", source.emissiveFactor)));
-                //   }
+                // Keep diagnostic emission disabled.
+                // Emissive-material support can be implemented separately.
                 if (material.HasProperty("_EmissionColor"))
                 {
-                    material.SetColor(
-                        "_EmissionColor", Color.magenta);
-
-                    material.EnableKeyword("_EMISSION");
-
-                    Log("[EMISSION TEST] Material " + i +
-                        ": emission forced to magenta; " +
-                        "source emissiveFactor=" +
-                        (source.emissiveFactor == null
-                            ? "<null>"
-                            : string.Join(",", source.emissiveFactor)));
+                    material.SetColor("_EmissionColor", Color.black);
+                    material.DisableKeyword("_EMISSION");
                 }
 
                 result[i] = material;
@@ -577,11 +555,6 @@ namespace ULTRADROID.Models
         //   R = metallic, A = smoothness (1 - roughness)
         // metallicFactor and roughnessFactor are baked in here.
         // Returns null (and logs) if the source cannot be read.
-        //
-        // DIAGNOSTIC BUILD (0.1.12): every converted pixel is forced to
-        // (0, 0, 0, 0) — fully non-metallic, fully rough — so we can
-        // observe whether Unity's Standard shader reacts to
-        // _MetallicGlossMap at all. Base color is untouched.
         private static Texture2D BuildUnityMetallicGlossTexture(
             Texture2D source,
             float metallicFactor,
@@ -624,20 +597,10 @@ namespace ULTRADROID.Models
                     float metallic =
                         (pixel.b / 255f) * metallicFactor;
 
-                    // Keep the source roughness calculation.
                     float roughness =
                         (pixel.g / 255f) * roughnessFactor;
 
-                    // Temporary test: reduce metalness slightly and make
-                    // metallic regions smoother to help reveal reflections.
-                    metallic *= 0.75f;
-
                     float smoothness = 1f - roughness;
-
-                    if (metallic > 0.25f)
-                    {
-                        smoothness = Mathf.Max(smoothness, 0.70f);
-                    }
 
                     byte metallicByte = (byte)Mathf.Clamp(
                         Mathf.RoundToInt(metallic * 255f), 0, 255);
@@ -645,11 +608,8 @@ namespace ULTRADROID.Models
                     byte smoothnessByte = (byte)Mathf.Clamp(
                         Mathf.RoundToInt(smoothness * 255f), 0, 255);
 
-                    // DIAGNOSTIC: force fully non-metallic, fully rough.
-                    // Restore the original write after testing:
-                    //   convertedPixels[i] = new Color32(
-                    //       metallicByte, 0, 0, smoothnessByte);
-                    convertedPixels[i] = new Color32(0, 0, 0, 0);
+                    convertedPixels[i] = new Color32(
+                        metallicByte, 0, 0, smoothnessByte);
                 }
 
                 // linear = true: this is data, not color.
@@ -667,7 +627,8 @@ namespace ULTRADROID.Models
                 converted.SetPixels32(convertedPixels);
                 converted.Apply(true, false);
 
-                // DIAGNOSTIC: sample the converted texture's first pixels.
+                // DIAGNOSTIC: sample the converted texture's first pixels
+                // to confirm the restored conversion ran.
                 Color32[] pixels = converted.GetPixels32();
 
                 int count = Math.Min(pixels.Length, 1000);
