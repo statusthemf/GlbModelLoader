@@ -20,7 +20,10 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.8-metallic-roughness";
+        public const string Version = "0.1.9-uv-noflip-test";
+
+        // UV TEST SWITCH: true = flip V (1 - v), false = use V as-is.
+        private const bool FlipUvV = false;
 
         private static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
@@ -1127,18 +1130,18 @@ namespace ULTRADROID.Models
 
                 foreach (Vector2 coordinate in uv)
                 {
-                    // TEMPORARY UV TEST: flip V only.
+                    // TEMPORARY UV TEST: V flip controlled by FlipUvV.
                     il2CppUv.Add(new Vector4(
                         coordinate.x,
-                        1f - coordinate.y,
+                        FlipUvV ? 1f - coordinate.y : coordinate.y,
                         0f,
                         0f));
                 }
 
                 mesh.SetUVs(0, il2CppUv);
 
-                Log("[MESH DIAG] UV coordinates applied with V flip. Count=" +
-                    uv.Count);
+                Log("[MESH DIAG] UV coordinates applied. FlipUvV=" +
+                    FlipUvV + ", Count=" + uv.Count);
             }
             else
             {
