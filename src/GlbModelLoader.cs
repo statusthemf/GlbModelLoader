@@ -1,13 +1,10 @@
-// ULTRADROID Models API - GLB 2.0 loader
-// Target: Unity 2021.3 / BepInEx IL2CPP (Android)
-// Simple Newtonsoft.Json version (no JsonSerializerSettings)
+
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
-using Newtonsoft.Json;
 
 namespace ULTRADROID.Models
 {
@@ -23,7 +20,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.1-simple-newtonsoft";
+        public const string Version = "0.1.1-diagnostic-no-json";
 
         private static void Log(string message)
         {
@@ -32,8 +29,7 @@ namespace ULTRADROID.Models
 
         private static void LogError(string message, Exception ex)
         {
-            Debug.LogError(
-                "[ULTRADROID Models] " + message + "\n" + ex);
+            Debug.LogError("[ULTRADROID Models] " + message + "\n" + ex);
         }
 
         public static GameObject LoadGLB(
@@ -54,9 +50,7 @@ namespace ULTRADROID.Models
             options = options ?? new ModelLoadOptions();
 
             Log("Reading GLB: " + path);
-
             byte[] fileBytes = File.ReadAllBytes(path);
-
             Log("File read complete. Bytes=" + fileBytes.Length);
 
             Log("CHECKPOINT A: GLB parsing begins");
@@ -75,8 +69,15 @@ namespace ULTRADROID.Models
 
             Log("CHECKPOINT B: GLB parsing complete");
 
-            Log("Document counts: nodes=" +
-                Count(doc.json.nodes) +
+            // The diagnostic Parse intentionally returns null.
+            // Stop safely here rather than dereferencing doc.
+            if (doc == null)
+            {
+                Log("DIAGNOSTIC TEST COMPLETE: Parse returned null intentionally.");
+                return null;
+            }
+
+            Log("Document counts: nodes=" + Count(doc.json.nodes) +
                 ", meshes=" + Count(doc.json.meshes) +
                 ", accessors=" + Count(doc.json.accessors) +
                 ", bufferViews=" + Count(doc.json.bufferViews) +
@@ -141,9 +142,7 @@ namespace ULTRADROID.Models
             catch (Exception ex)
             {
                 LogError("LoadGLB caught a managed exception", ex);
-
                 UnityEngine.Object.Destroy(root);
-
                 throw;
             }
         }
@@ -172,7 +171,6 @@ namespace ULTRADROID.Models
             for (int i = 0; i < count; i++)
             {
                 Log("BuildTextures: image " + i);
-
                 GltfImage image = doc.json.images[i];
 
                 if (image == null ||
@@ -185,7 +183,6 @@ namespace ULTRADROID.Models
                 }
 
                 byte[] bytes = doc.ReadBufferView(image.bufferView);
-
                 Log("BuildTextures: image bytes=" + bytes.Length);
 
                 Texture2D texture = new Texture2D(
@@ -223,7 +220,6 @@ namespace ULTRADROID.Models
             Material[] result = new Material[count + 1];
 
             Log("BuildMaterials ENTER. Count=" + count);
-
             Log("BuildMaterials: finding Standard shader");
 
             Shader shader = Shader.Find("Standard");
@@ -249,7 +245,6 @@ namespace ULTRADROID.Models
             for (int i = 0; i < count; i++)
             {
                 Log("BuildMaterials: material " + i + " begins");
-
                 GltfMaterial source = doc.json.materials[i];
 
                 if (source == null)
@@ -259,7 +254,6 @@ namespace ULTRADROID.Models
                 }
 
                 Material material = new Material(shader);
-
                 Log("BuildMaterials: Material object created " + i);
 
                 material.name = string.IsNullOrEmpty(source.name)
@@ -302,8 +296,7 @@ namespace ULTRADROID.Models
 
                     if (material.HasProperty("_Glossiness"))
                         material.SetFloat(
-                            "_Glossiness",
-                            1f - pbr.roughnessFactor);
+                            "_Glossiness", 1f - pbr.roughnessFactor);
                 }
 
                 if (source.emissiveFactor != null &&
@@ -320,7 +313,6 @@ namespace ULTRADROID.Models
                 }
 
                 result[i] = material;
-
                 Log("BuildMaterials: material " + i + " complete");
             }
 
@@ -345,7 +337,6 @@ namespace ULTRADROID.Models
                 return -1;
 
             GltfTexture texture = doc.json.textures[textureIndex];
-
             return texture == null ? -1 : texture.source;
         }
 
@@ -418,12 +409,8 @@ namespace ULTRADROID.Models
                     ", node index=" + roots[i]);
 
                 BuildNode(
-                    doc,
-                    roots[i],
-                    root,
-                    materials,
-                    colliders,
-                    recursionGuard);
+                    doc, roots[i], root, materials,
+                    colliders, recursionGuard);
 
                 Log("BuildScene: root " + i + " complete");
             }
@@ -465,15 +452,12 @@ namespace ULTRADROID.Models
             guard.Add(index);
 
             GameObject gameObject = new GameObject(nodeName);
-
             Log("BuildNode: GameObject created");
 
             gameObject.transform.SetParent(parent, false);
-
             Log("BuildNode: parent set");
 
             ApplyNodeTransform(gameObject.transform, node);
-
             Log("BuildNode: transform applied");
 
             if (node.mesh >= 0 &&
@@ -487,11 +471,7 @@ namespace ULTRADROID.Models
                     Log("BuildNode: calling BuildMesh");
 
                     BuildMesh(
-                        doc,
-                        mesh,
-                        gameObject,
-                        materials,
-                        colliders);
+                        doc, mesh, gameObject, materials, colliders);
 
                     Log("BuildNode: BuildMesh returned");
                 }
@@ -505,17 +485,12 @@ namespace ULTRADROID.Models
                         ", node index=" + node.children[i]);
 
                     BuildNode(
-                        doc,
-                        node.children[i],
-                        gameObject.transform,
-                        materials,
-                        colliders,
-                        guard);
+                        doc, node.children[i], gameObject.transform,
+                        materials, colliders, guard);
                 }
             }
 
             guard.Remove(index);
-
             Log("BuildNode EXIT: " + nodeName);
         }
 
@@ -555,19 +530,14 @@ namespace ULTRADROID.Models
                 node.rotation.Length >= 4)
             {
                 transform.localRotation = new Quaternion(
-                    node.rotation[0],
-                    node.rotation[1],
-                    node.rotation[2],
-                    node.rotation[3]);
+                    node.rotation[0], node.rotation[1],
+                    node.rotation[2], node.rotation[3]);
             }
 
-            if (node.scale != null &&
-                node.scale.Length >= 3)
+            if (node.scale != null && node.scale.Length >= 3)
             {
                 transform.localScale = new Vector3(
-                    node.scale[0],
-                    node.scale[1],
-                    node.scale[2]);
+                    node.scale[0], node.scale[1], node.scale[2]);
             }
         }
 
@@ -591,18 +561,13 @@ namespace ULTRADROID.Models
                 return;
             }
 
-            Log("BuildMesh: primitive count=" +
-                source.primitives.Length);
+            Log("BuildMesh: primitive count=" + source.primitives.Length);
 
             List<Vector3> vertices = new List<Vector3>();
             List<Vector3> normals = new List<Vector3>();
             List<Vector2> uv = new List<Vector2>();
-
-            List<List<int>> submeshTriangles =
-                new List<List<int>>();
-
-            List<Material> submeshMaterials =
-                new List<Material>();
+            List<List<int>> submeshTriangles = new List<List<int>>();
+            List<Material> submeshMaterials = new List<Material>();
 
             bool hasNormals = true;
             bool hasUv = true;
@@ -610,7 +575,6 @@ namespace ULTRADROID.Models
             for (int p = 0; p < source.primitives.Length; p++)
             {
                 GltfPrimitive primitive = source.primitives[p];
-
                 Log("BuildMesh: primitive " + p + " ENTER");
 
                 if (primitive == null ||
@@ -622,10 +586,8 @@ namespace ULTRADROID.Models
                 }
 
                 if (primitive.mode != 4)
-                {
                     throw new InvalidDataException(
                         "Only TRIANGLES primitives are currently supported.");
-                }
 
                 Log("BuildMesh: reading POSITION accessor " +
                     primitive.attributes.POSITION);
@@ -641,10 +603,8 @@ namespace ULTRADROID.Models
                 if (primitive.attributes.NORMAL >= 0)
                 {
                     Log("BuildMesh: reading NORMAL accessor");
-
                     primitiveNormals =
                         doc.ReadVector3(primitive.attributes.NORMAL);
-
                     Log("BuildMesh: NORMAL read; count=" +
                         primitiveNormals.Length);
                 }
@@ -654,40 +614,28 @@ namespace ULTRADROID.Models
                 if (primitive.attributes.TEXCOORD_0 >= 0)
                 {
                     Log("BuildMesh: reading TEXCOORD_0 accessor");
-
                     primitiveUv =
                         doc.ReadVector2(primitive.attributes.TEXCOORD_0);
-
                     Log("BuildMesh: TEXCOORD_0 read; count=" +
                         primitiveUv.Length);
                 }
 
                 int vertexOffset = vertices.Count;
-
                 vertices.AddRange(primitiveVertices);
 
-                Log("BuildMesh: vertices merged; total=" +
-                    vertices.Count);
+                Log("BuildMesh: vertices merged; total=" + vertices.Count);
 
                 if (primitiveNormals == null ||
                     primitiveNormals.Length != primitiveVertices.Length)
-                {
                     hasNormals = false;
-                }
                 else
-                {
                     normals.AddRange(primitiveNormals);
-                }
 
                 if (primitiveUv == null ||
                     primitiveUv.Length != primitiveVertices.Length)
-                {
                     hasUv = false;
-                }
                 else
-                {
                     uv.AddRange(primitiveUv);
-                }
 
                 int[] indices;
 
@@ -695,21 +643,17 @@ namespace ULTRADROID.Models
                 {
                     Log("BuildMesh: reading index accessor " +
                         primitive.indices);
-
                     indices = doc.ReadIndices(primitive.indices);
                 }
                 else
                 {
                     Log("BuildMesh: generating sequential indices");
-
-                    indices = MakeSequential(
-                        primitiveVertices.Length);
+                    indices = MakeSequential(primitiveVertices.Length);
                 }
 
                 Log("BuildMesh: indices read; count=" + indices.Length);
 
-                List<int> triangles =
-                    new List<int>(indices.Length);
+                List<int> triangles = new List<int>(indices.Length);
 
                 for (int j = 0; j + 2 < indices.Length; j += 3)
                 {
@@ -742,7 +686,6 @@ namespace ULTRADROID.Models
                         : materials.Length - 1;
 
                 submeshMaterials.Add(materials[materialIndex]);
-
                 Log("BuildMesh: primitive " + p + " complete");
             }
 
@@ -756,9 +699,7 @@ namespace ULTRADROID.Models
             }
 
             Log("BuildMesh: creating Unity Mesh");
-
             Mesh mesh = new Mesh();
-
             Log("BuildMesh: Unity Mesh created");
 
             mesh.name = string.IsNullOrEmpty(source.name)
@@ -768,10 +709,8 @@ namespace ULTRADROID.Models
             if (vertices.Count > 65535)
             {
                 Log("BuildMesh: setting UInt32 index format");
-
                 mesh.indexFormat =
                     UnityEngine.Rendering.IndexFormat.UInt32;
-
                 Log("BuildMesh: UInt32 index format set");
             }
 
@@ -786,26 +725,17 @@ namespace ULTRADROID.Models
             for (int i = 0; i < vertices.Count; i++)
                 il2CppVertices.Add(vertices[i]);
 
-            Log("BuildMesh: vertex list filled; count=" +
-                vertices.Count);
-
+            Log("BuildMesh: vertex list filled; count=" + vertices.Count);
             Log("BuildMesh: calling Mesh.SetVertices");
 
             mesh.SetVertices(il2CppVertices);
-
             Log("BuildMesh: Mesh.SetVertices returned");
-
-            Log("BuildMesh: setting subMeshCount=" +
-                submeshTriangles.Count);
 
             mesh.subMeshCount = submeshTriangles.Count;
 
-            Log("BuildMesh: subMeshCount set");
-
             for (int i = 0; i < submeshTriangles.Count; i++)
             {
-                int[] triangleArray =
-                    submeshTriangles[i].ToArray();
+                int[] triangleArray = submeshTriangles[i].ToArray();
 
                 Log("BuildMesh: submesh " + i +
                     ", index count=" + triangleArray.Length);
@@ -813,17 +743,12 @@ namespace ULTRADROID.Models
                 Il2CppStructArray<int> il2CppTriangles =
                     new Il2CppStructArray<int>(triangleArray);
 
-                Log("BuildMesh: triangle array created for submesh " + i);
-
                 mesh.SetTriangles(il2CppTriangles, i, false);
-
                 Log("BuildMesh: SetTriangles returned for submesh " + i);
             }
 
             if (hasNormals && normals.Count == vertices.Count)
             {
-                Log("BuildMesh: creating IL2CPP normals list");
-
                 Il2CppSystem.Collections.Generic.List<Vector3>
                     il2CppNormals =
                         new Il2CppSystem.Collections.Generic.List<Vector3>();
@@ -831,25 +756,15 @@ namespace ULTRADROID.Models
                 for (int i = 0; i < normals.Count; i++)
                     il2CppNormals.Add(normals[i]);
 
-                Log("BuildMesh: calling Mesh.SetNormals");
-
                 mesh.SetNormals(il2CppNormals);
-
-                Log("BuildMesh: Mesh.SetNormals returned");
             }
             else
             {
-                Log("BuildMesh: calling RecalculateNormals");
-
                 mesh.RecalculateNormals();
-
-                Log("BuildMesh: RecalculateNormals returned");
             }
 
             if (hasUv && uv.Count == vertices.Count)
             {
-                Log("BuildMesh: creating IL2CPP UV list");
-
                 Il2CppSystem.Collections.Generic.List<Vector4>
                     il2CppUv =
                         new Il2CppSystem.Collections.Generic.List<Vector4>();
@@ -857,67 +772,30 @@ namespace ULTRADROID.Models
                 for (int i = 0; i < uv.Count; i++)
                 {
                     Vector2 coordinate = uv[i];
-
                     il2CppUv.Add(new Vector4(
-                        coordinate.x,
-                        coordinate.y,
-                        0f,
-                        0f));
+                        coordinate.x, coordinate.y, 0f, 0f));
                 }
 
-                Log("BuildMesh: calling Mesh.SetUVs");
-
                 mesh.SetUVs(0, il2CppUv);
-
-                Log("BuildMesh: Mesh.SetUVs returned");
             }
-            else
-            {
-                Log("BuildMesh: UVs missing or mismatched; skipped");
-            }
-
-            Log("BuildMesh: calling RecalculateBounds");
 
             mesh.RecalculateBounds();
 
-            Log("BuildMesh: RecalculateBounds returned");
-
-            Log("BuildMesh: adding MeshFilter");
-
-            MeshFilter filter =
-                gameObject.AddComponent<MeshFilter>();
-
-            Log("BuildMesh: assigning sharedMesh");
-
+            MeshFilter filter = gameObject.AddComponent<MeshFilter>();
             filter.sharedMesh = mesh;
-
-            Log("BuildMesh: MeshFilter assigned");
-
-            Log("BuildMesh: adding MeshRenderer");
 
             MeshRenderer renderer =
                 gameObject.AddComponent<MeshRenderer>();
-
-            Log("BuildMesh: creating sharedMaterials array");
 
             renderer.sharedMaterials =
                 new Il2CppReferenceArray<Material>(
                     submeshMaterials.ToArray());
 
-            Log("BuildMesh: sharedMaterials assigned");
-
             if (colliders)
             {
-                Log("BuildMesh: adding MeshCollider");
-
                 MeshCollider collider =
                     gameObject.AddComponent<MeshCollider>();
-
-                Log("BuildMesh: assigning collider mesh");
-
                 collider.sharedMesh = mesh;
-
-                Log("BuildMesh: collider mesh assigned");
             }
 
             Log("BuildMesh EXIT: " + meshLabel);
@@ -959,12 +837,9 @@ namespace ULTRADROID.Models
 
             uint declaredLength = ReadU32(file, 8);
 
-            if (declaredLength > file.Length ||
-                declaredLength < 20)
-            {
+            if (declaredLength > file.Length || declaredLength < 20)
                 throw new InvalidDataException(
                     "GLB declared length is invalid.");
-            }
 
             byte[] jsonBytes = null;
             byte[] binBytes = null;
@@ -977,14 +852,11 @@ namespace ULTRADROID.Models
             {
                 uint chunkLength = ReadU32(file, position);
                 uint chunkType = ReadU32(file, position + 4);
-
                 position += 8;
 
                 if (chunkLength > fileLength - position)
-                {
                     throw new InvalidDataException(
                         "GLB chunk exceeds file length.");
-                }
 
                 Debug.Log(
                     "[ULTRADROID Models] Parse: chunk " +
@@ -995,11 +867,7 @@ namespace ULTRADROID.Models
                 byte[] chunk = new byte[(int)chunkLength];
 
                 Buffer.BlockCopy(
-                    file,
-                    position,
-                    chunk,
-                    0,
-                    (int)chunkLength);
+                    file, position, chunk, 0, (int)chunkLength);
 
                 position += (int)chunkLength;
 
@@ -1023,84 +891,34 @@ namespace ULTRADROID.Models
                 "[ULTRADROID Models] Parse: JSON extracted; chars=" +
                 jsonText.Length);
 
-            // ============================================================
-            // SIMPLE NEWTONSOFT CALL (IL2CPP-safe)
-            // ============================================================
-            Debug.Log("[ULTRADROID Models] Parse: calling Newtonsoft.Json (simple)");
-
-            GltfRoot root;
-
-            try
-            {
-                root = JsonConvert.DeserializeObject<GltfRoot>(jsonText);
-
-                Debug.Log("[ULTRADROID Models] Parse: Newtonsoft.Json returned");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError(
-                    "[ULTRADROID Models] Newtonsoft JSON parsing failed:\n" + ex);
-                throw new InvalidDataException(
-                    "Failed to deserialize the GLB JSON chunk.", ex);
-            }
-
-            if (root == null)
-            {
-                throw new InvalidDataException(
-                    "GLB JSON deserialization returned null.");
-            }
-            // ============================================================
-
-            if (root.asset == null ||
-                string.IsNullOrEmpty(root.asset.version))
-            {
-                throw new InvalidDataException(
-                    "GLB JSON is missing asset.version.");
-            }
-
-            if (!root.asset.version.StartsWith("2"))
-                throw new InvalidDataException(
-                    "Only glTF 2.x files are supported.");
-
-            if (root.accessors == null)
-                throw new InvalidDataException(
-                    "GLB JSON accessors were not deserialized.");
-
-            if (root.bufferViews == null)
-                throw new InvalidDataException(
-                    "GLB JSON bufferViews were not deserialized.");
-
-            if (root.nodes == null)
-                throw new InvalidDataException(
-                    "GLB JSON nodes were not deserialized.");
+            // =========================================================
+            // PURE ISOLATION TEST:
+            // No Newtonsoft.Json, JsonUtility, reflection, or object
+            // deserialization. This method intentionally returns null.
+            // =========================================================
 
             Debug.Log(
-                "[ULTRADROID Models] Parse: validation complete; " +
-                "nodes=" + root.nodes.Length +
-                ", meshes=" + (root.meshes == null ? 0 : root.meshes.Length) +
-                ", accessors=" + root.accessors.Length +
-                ", bufferViews=" + root.bufferViews.Length +
-                ", binaryBytes=" + (binBytes == null ? 0 : binBytes.Length));
+                "[ULTRADROID Models] TEST 1: before any JSON work");
 
-            return new GlbDocument
-            {
-                json = root,
-                binary = binBytes ?? new byte[0]
-            };
+            string copy = jsonText;
+
+            Debug.Log(
+                "[ULTRADROID Models] TEST 2: copied, length = " +
+                copy.Length);
+
+            Debug.Log(
+                "[ULTRADROID Models] TEST COMPLETE: returning null intentionally");
+
+            return null;
         }
 
         internal byte[] ReadBufferView(int index)
         {
             GltfBufferView view = GetView(index);
-
             byte[] result = new byte[view.byteLength];
 
             Buffer.BlockCopy(
-                binary,
-                view.byteOffset,
-                result,
-                0,
-                view.byteLength);
+                binary, view.byteOffset, result, 0, view.byteLength);
 
             return result;
         }
@@ -1136,9 +954,7 @@ namespace ULTRADROID.Models
             return result;
         }
 
-        internal float[] ReadFloats(
-            int accessorIndex,
-            int components)
+        internal float[] ReadFloats(int accessorIndex, int components)
         {
             GltfAccessor accessor = GetAccessor(accessorIndex);
 
@@ -1151,7 +967,6 @@ namespace ULTRADROID.Models
                     "Unexpected accessor type for vector attribute.");
 
             GltfBufferView view = GetView(accessor.bufferView);
-
             int elementSize = components * 4;
 
             int stride = view.byteStride > 0
@@ -1162,25 +977,18 @@ namespace ULTRADROID.Models
                 throw new InvalidDataException(
                     "Accessor byte stride is too small.");
 
-            int start = checked(
-                view.byteOffset + accessor.byteOffset);
-
-            float[] result = new float[
-                checked(accessor.count * components)];
+            int start = checked(view.byteOffset + accessor.byteOffset);
+            float[] result = new float[checked(accessor.count * components)];
 
             for (int i = 0; i < accessor.count; i++)
             {
                 for (int c = 0; c < components; c++)
                 {
-                    int offset = checked(
-                        start + i * stride + c * 4);
+                    int offset = checked(start + i * stride + c * 4);
 
-                    if (offset < 0 ||
-                        offset + 4 > binary.Length)
-                    {
+                    if (offset < 0 || offset + 4 > binary.Length)
                         throw new InvalidDataException(
                             "Vertex accessor exceeds binary data.");
-                    }
 
                     result[i * components + c] =
                         BitConverter.ToSingle(binary, offset);
@@ -1221,21 +1029,16 @@ namespace ULTRADROID.Models
                 throw new InvalidDataException(
                     "Index byte stride is too small.");
 
-            int start = checked(
-                view.byteOffset + accessor.byteOffset);
-
+            int start = checked(view.byteOffset + accessor.byteOffset);
             int[] result = new int[accessor.count];
 
             for (int i = 0; i < accessor.count; i++)
             {
                 int offset = checked(start + i * stride);
 
-                if (offset < 0 ||
-                    offset + elementSize > binary.Length)
-                {
+                if (offset < 0 || offset + elementSize > binary.Length)
                     throw new InvalidDataException(
                         "Index accessor exceeds binary data.");
-                }
 
                 if (elementSize == 1)
                 {
@@ -1243,17 +1046,14 @@ namespace ULTRADROID.Models
                 }
                 else if (elementSize == 2)
                 {
-                    result[i] =
-                        BitConverter.ToUInt16(binary, offset);
+                    result[i] = BitConverter.ToUInt16(binary, offset);
                 }
                 else
                 {
-                    uint value =
-                        BitConverter.ToUInt32(binary, offset);
+                    uint value = BitConverter.ToUInt32(binary, offset);
 
                     if (value > int.MaxValue)
-                        throw new InvalidDataException(
-                            "Index is too large.");
+                        throw new InvalidDataException("Index is too large.");
 
                     result[i] = (int)value;
                 }
@@ -1265,25 +1065,17 @@ namespace ULTRADROID.Models
         private GltfAccessor GetAccessor(int index)
         {
             if (json.accessors == null ||
-                index < 0 ||
-                index >= json.accessors.Length)
-            {
-                throw new InvalidDataException(
-                    "Accessor index is invalid.");
-            }
+                index < 0 || index >= json.accessors.Length)
+                throw new InvalidDataException("Accessor index is invalid.");
 
             GltfAccessor accessor = json.accessors[index];
 
             if (accessor == null)
-                throw new InvalidDataException(
-                    "Accessor entry is null.");
+                throw new InvalidDataException("Accessor entry is null.");
 
-            if (accessor.count < 0 ||
-                accessor.byteOffset < 0)
-            {
+            if (accessor.count < 0 || accessor.byteOffset < 0)
                 throw new InvalidDataException(
                     "Accessor contains a negative count or offset.");
-            }
 
             return accessor;
         }
@@ -1291,27 +1083,21 @@ namespace ULTRADROID.Models
         private GltfBufferView GetView(int index)
         {
             if (json.bufferViews == null ||
-                index < 0 ||
-                index >= json.bufferViews.Length)
-            {
+                index < 0 || index >= json.bufferViews.Length)
                 throw new InvalidDataException(
                     "Buffer view index is invalid.");
-            }
 
             GltfBufferView view = json.bufferViews[index];
 
             if (view == null)
-                throw new InvalidDataException(
-                    "Buffer view entry is null.");
+                throw new InvalidDataException("Buffer view entry is null.");
 
             if (view.byteOffset < 0 ||
                 view.byteLength < 0 ||
                 view.byteOffset > binary.Length ||
                 view.byteLength > binary.Length - view.byteOffset)
-            {
                 throw new InvalidDataException(
                     "Buffer view is outside the binary chunk.");
-            }
 
             if (view.buffer != 0)
                 throw new InvalidDataException(
