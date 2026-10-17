@@ -1,9 +1,9 @@
+
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
-using Newtonsoft.Json;
 using UnityEngine;
 
 namespace ULTRADROID.Models
@@ -20,7 +20,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.2-glb-parser";
+        public const string Version = "0.1.3-manual-json";
 
         private static void Log(string message)
         {
@@ -746,24 +746,25 @@ namespace ULTRADROID.Models
             Debug.Log("[ULTRADROID Models] JSON extracted; chars=" +
                 jsonText.Length);
 
-            Debug.Log("[ULTRADROID Models] Deserializing glTF JSON with Newtonsoft.Json.");
-
             GltfRoot root;
 
             try
             {
-                root = JsonConvert.DeserializeObject<GltfRoot>(jsonText);
+                Debug.Log(
+                    "[ULTRADROID Models] Parsing glTF JSON with manual parser.");
+
+                root = GlbManualJsonParser.ParseRoot(jsonText);
             }
             catch (Exception ex)
             {
                 Debug.LogError(
-                    "[ULTRADROID Models] Newtonsoft JSON parsing failed: " + ex);
+                    "[ULTRADROID Models] Manual JSON parsing failed: " + ex);
                 throw;
             }
 
             if (root == null)
                 throw new InvalidDataException(
-                    "JSON deserialization returned null.");
+                    "Manual JSON parser returned null.");
 
             if (binBytes == null)
                 binBytes = new byte[0];
