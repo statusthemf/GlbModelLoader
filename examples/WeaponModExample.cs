@@ -11,7 +11,7 @@ using ULTRADROID.Models;
 [BepInPlugin(
     "com.statusthemf.ultradroid.bladesofchaos",
     "ULTRADROID Blades of Chaos",
-    "0.4.7"
+    "0.4.8"
 )]
 [BepInDependency(
     "com.statusthemf.ultradroid.models",
@@ -25,7 +25,7 @@ public sealed class BladesOfChaosPlugin : BasePlugin
     {
         DiagLog = Log;
 
-        Log.LogInfo("[BLADE DEBUG 0.4.7] Plugin starting.");
+        Log.LogInfo("[BLADE DEBUG 0.4.8] Plugin starting.");
         Log.LogInfo("[BLADE DEBUG] Plugin directory: " + Paths.PluginPath);
 
         try
@@ -382,19 +382,30 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
                 }
             }
 
-            // TEXTURE DIAGNOSTICS:
-            // Explicitly enable texture loading in the Model API.
+            // Model placement and size.
+            // The model remains parented to the camera.
             var options = new ModelLoadOptions
-           {
-               Name = "ULTRADROID_BladesOfChaos_DebugModel",
-               Position = new Vector3(0.45f, -0.45f, 1.2f),
-               RotationEuler = Vector3.zero,
-               Scale = new Vector3(0.1f, 0.1f, 0.1f),
-               LoadTextures = true,
-               CreateColliders = false
+            {
+                Name = "ULTRADROID_BladesOfChaos_DebugModel",
+
+                // Less rightward offset; move closer to the screen center.
+                Position = new Vector3(0.15f, -0.15f, 1.0f),
+
+                // Preserve the existing model orientation.
+                RotationEuler = Vector3.zero,
+
+                // Smaller model so more of the sword fits on screen.
+                Scale = new Vector3(0.07f, 0.07f, 0.07f),
+
+                // Keep the working texture loading enabled.
+                LoadTextures = true,
+                CreateColliders = false
             };
 
-            Log("[BLADE DEBUG] Calling ModelAPI.LoadGLB with textures ENABLED.");
+            Log(
+                "[BLADE DEBUG] Loading model with textures enabled. " +
+                "Position=(0.15, -0.15, 1.0), Scale=0.07."
+            );
 
             GameObject result = ModelAPI.LoadGLB(
                 path,
