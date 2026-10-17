@@ -45,7 +45,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
     public BladesOfChaosRunner(IntPtr ptr) : base(ptr) { }
 
-    private void Update()
+    public void Update()
     {
         string sceneName = SceneManager.GetActiveScene().name;
 
