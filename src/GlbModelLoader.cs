@@ -20,10 +20,10 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.9-uv-noflip-test";
+        public const string Version = "0.1.11-metallic-smooth-diag";
 
         // UV TEST SWITCH: true = flip V (1 - v), false = use V as-is.
-        private const bool FlipUvV = false;
+        private const bool FlipUvV = true;
 
         private static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
@@ -562,6 +562,10 @@ namespace ULTRADROID.Models
         //   R = metallic, A = smoothness (1 - roughness)
         // metallicFactor and roughnessFactor are baked in here.
         // Returns null (and logs) if the source cannot be read.
+        //
+        // DIAGNOSTIC BUILD (0.1.11): metallic is scaled to 75% and
+        // any metalness > 0.25 is forced to at least 0.70 smoothness.
+        // This is a visual test only; it is not physically accurate.
         private static Texture2D BuildUnityMetallicGlossTexture(
             Texture2D source,
             float metallicFactor,
@@ -604,10 +608,20 @@ namespace ULTRADROID.Models
                     float metallic =
                         (pixel.b / 255f) * metallicFactor;
 
+                    // Keep the source roughness calculation.
                     float roughness =
                         (pixel.g / 255f) * roughnessFactor;
 
+                    // Temporary test: reduce metalness slightly and make
+                    // metallic regions smoother to help reveal reflections.
+                    metallic *= 0.75f;
+
                     float smoothness = 1f - roughness;
+
+                    if (metallic > 0.25f)
+                    {
+                        smoothness = Mathf.Max(smoothness, 0.70f);
+                    }
 
                     byte metallicByte = (byte)Mathf.Clamp(
                         Mathf.RoundToInt(metallic * 255f), 0, 255);
@@ -636,6 +650,31 @@ namespace ULTRADROID.Models
 
                 converted.SetPixels32(convertedPixels);
                 converted.Apply(true, false);
+
+                // DIAGNOSTIC: sample the converted texture's first pixels.
+                Color32[] pixels = converted.GetPixels32();
+
+                int count = Math.Min(pixels.Length, 1000);
+                long metallicTotal = 0;
+                long smoothnessTotal = 0;
+
+                for (int i = 0; i < count; i++)
+                {
+                    metallicTotal += pixels[i].r;
+                    smoothnessTotal += pixels[i].a;
+                }
+
+                if (count > 0)
+                {
+                    Log("[ULTRADROID METALLIC DIAG] " +
+                        "Samples=" + count +
+                        ", average metallic=" +
+                        (metallicTotal / (float)count / 255f)
+                            .ToString("F3") +
+                        ", average smoothness=" +
+                        (smoothnessTotal / (float)count / 255f)
+                            .ToString("F3"));
+                }
 
                 Log("[METALLIC-ROUGHNESS] Convert OK: " +
                     converted.name + " " + width + "x" + height);
