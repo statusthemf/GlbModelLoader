@@ -20,7 +20,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.12-metallic-zero-diag";
+        public const string Version = "0.1.13-emission-diag";
 
         // UV TEST SWITCH: true = flip V (1 - v), false = use V as-is.
         private const bool FlipUvV = true;
@@ -525,16 +525,31 @@ namespace ULTRADROID.Models
                         ": PBR data is missing.");
                 }
 
-                // Keep the existing diagnostic emission test.
+                // DIAGNOSTIC (0.1.13): force bright magenta emission to
+                // verify the shader is actually reading material
+                // properties. Restore the original block after testing.
+                //
+                // Original behaviour (commented out):
+                //   if (material.HasProperty("_EmissionColor"))
+                //   {
+                //       material.SetColor("_EmissionColor", Color.black);
+                //       material.DisableKeyword("_EMISSION");
+                //       Log("[EMISSION TEST] Material " + i +
+                //           ": emission disabled; source emissiveFactor=" +
+                //           (source.emissiveFactor == null
+                //               ? "<null>"
+                //               : string.Join(",", source.emissiveFactor)));
+                //   }
                 if (material.HasProperty("_EmissionColor"))
                 {
                     material.SetColor(
-                        "_EmissionColor", Color.black);
+                        "_EmissionColor", Color.magenta);
 
-                    material.DisableKeyword("_EMISSION");
+                    material.EnableKeyword("_EMISSION");
 
                     Log("[EMISSION TEST] Material " + i +
-                        ": emission disabled; source emissiveFactor=" +
+                        ": emission forced to magenta; " +
+                        "source emissiveFactor=" +
                         (source.emissiveFactor == null
                             ? "<null>"
                             : string.Join(",", source.emissiveFactor)));
