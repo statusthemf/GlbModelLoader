@@ -1,4 +1,3 @@
-
 using System;
 using System.IO;
 using BepInEx;
@@ -9,238 +8,271 @@ using UnityEngine.SceneManagement;
 using ULTRADROID.Models;
 
 [BepInPlugin(
-    "com.statusthemf.ultradroid.bladesofchaos",
-    "ULTRADROID Blades of Chaos",
-    "0.5.0")]
+"com.statusthemf.ultradroid.bladesofchaos",
+"ULTRADROID Blades of Chaos",
+"0.5.0"
+)]
 [BepInDependency(
-    "com.statusthemf.ultradroid.models",
-    BepInDependency.DependencyFlags.HardDependency)]
+"com.statusthemf.ultradroid.models",
+BepInDependency.DependencyFlags.HardDependency
+)]
 public sealed class BladesOfChaosPlugin : BasePlugin
 {
-    internal static ManualLogSource DiagLog;
+internal static ManualLogSource DiagLog;
 
-    public override void Load()
-    {
-        DiagLog = Log;
+public override void Load()  
+{  
+    DiagLog = Log;  
 
-        try
-        {
-            AddComponent<BladesOfChaosRunner>();
-            Log.LogInfo("[BladesOfChaos] Plugin loaded.");
-        }
-        catch (Exception ex)
-        {
-            Log.LogError("[BladesOfChaos] Plugin initialization failed:");
-            Log.LogError(ex.ToString());
-        }
-    }
+    try  
+    {  
+        AddComponent<BladesOfChaosRunner>();  
+    }  
+    catch (Exception ex)  
+    {  
+        Log.LogError("[BladesOfChaos] Plugin initialization failed:");  
+        Log.LogError(ex.ToString());  
+    }  
+}
+
 }
 
 public sealed class BladesOfChaosRunner : MonoBehaviour
 {
-    private float nextSceneCheck;
-    private float nextModelAttempt = -1f;
-    private string lastSceneName;
-    private bool modelLoaded;
+private float nextSceneCheck;
+private float nextModelAttempt = -1f;
 
-    public BladesOfChaosRunner(IntPtr ptr) : base(ptr)
-    {
-    }
+private string lastSceneName;  
+private bool modelLoaded;  
 
-    public void Start()
-    {
-        try
-        {
-            CheckScene(true);
-        }
-        catch (Exception ex)
-        {
-            LogError("[BladesOfChaos] Initial scene check failed:");
-            LogError(ex.ToString());
-        }
-    }
+public BladesOfChaosRunner(IntPtr ptr) : base(ptr)  
+{  
+}  
 
-    public void Update()
-    {
-        float now = Time.unscaledTime;
+public void Start()  
+{  
+    try  
+    {  
+        CheckScene(true);  
+    }  
+    catch (Exception ex)  
+    {  
+        LogError("[BladesOfChaos] Initial scene check failed:");  
+        LogError(ex.ToString());  
+    }  
+}  
 
-        if (now >= nextSceneCheck)
-        {
-            nextSceneCheck = now + 1f;
+public void Update()  
+{  
+    float now = Time.unscaledTime;  
 
-            try
-            {
-                CheckScene(false);
-            }
-            catch (Exception ex)
-            {
-                LogError("[BladesOfChaos] Scene polling failed:");
-                LogError(ex.ToString());
-            }
-        }
+    if (now >= nextSceneCheck)  
+    {  
+        nextSceneCheck = now + 1f;  
 
-        if (nextModelAttempt >= 0f &&
-            now >= nextModelAttempt &&
-            !modelLoaded)
-        {
-            nextModelAttempt = -1f;
+        try  
+        {  
+            CheckScene(false);  
+        }  
+        catch (Exception ex)  
+        {  
+            LogError("[BladesOfChaos] Scene polling failed:");  
+            LogError(ex.ToString());  
+        }  
+    }  
 
-            if (TryLoadModel())
-            {
-                modelLoaded = true;
-            }
-            else
-            {
-                nextModelAttempt = Time.unscaledTime + 5f;
-            }
-        }
-    }
+    if (nextModelAttempt >= 0f &&  
+        now >= nextModelAttempt &&  
+        !modelLoaded)  
+    {  
+        nextModelAttempt = -1f;  
 
-    private void CheckScene(bool forceCheck)
-    {
-        Scene scene = SceneManager.GetActiveScene();
-        string sceneName = scene.name ?? "";
+        bool success = TryLoadModel();  
 
-        bool changed = !string.Equals(
-            lastSceneName,
-            sceneName,
-            StringComparison.Ordinal);
+        if (success)  
+        {  
+            modelLoaded = true;  
+        }  
+        else  
+        {  
+            nextModelAttempt = Time.unscaledTime + 5f;  
+        }  
+    }  
+}  
 
-        if (!forceCheck && !changed)
-            return;
+private void CheckScene(bool forceLog)  
+{  
+    Scene scene = SceneManager.GetActiveScene();  
+    string sceneName = scene.name ?? "";  
 
-        lastSceneName = sceneName;
-        nextModelAttempt = -1f;
+    bool changed = !string.Equals(  
+        lastSceneName,  
+        sceneName,  
+        StringComparison.Ordinal  
+    );  
 
-        if (changed)
-            modelLoaded = false;
+    if (!forceLog && !changed)  
+        return;  
 
-        if (!IsGameplayScene(sceneName, scene.isLoaded))
-            return;
+    lastSceneName = sceneName;  
+    nextModelAttempt = -1f;  
 
-        if (modelLoaded)
-            return;
+    if (changed)  
+        modelLoaded = false;  
 
-        nextModelAttempt = Time.unscaledTime + 5f;
-    }
+    if (!IsGameplayScene(sceneName, scene.isLoaded))  
+        return;  
 
-    private bool IsGameplayScene(string sceneName, bool isLoaded)
-    {
-        if (!isLoaded || string.IsNullOrEmpty(sceneName))
-            return false;
+    if (modelLoaded)  
+        return;  
 
-        string lower = sceneName.ToLowerInvariant();
+    nextModelAttempt = Time.unscaledTime + 5f;  
+}  
 
-        string[] excluded =
-        {
-            "intro", "bootstrap", "mainmenu", "main_menu",
-            "menu", "loading", "loader", "credits",
-            "options", "settings", "title"
-        };
+private bool IsGameplayScene(string sceneName, bool isLoaded)  
+{  
+    if (!isLoaded || string.IsNullOrWhiteSpace(sceneName))  
+        return false;  
 
-        foreach (string word in excluded)
-        {
-            if (lower.Contains(word))
-                return false;
-        }
+    if (sceneName.Equals(  
+        "uk_construct",  
+        StringComparison.OrdinalIgnoreCase))  
+    {  
+        return true;  
+    }  
 
-        if (lower.Contains("uk_construct"))
-            return true;
+    string lower = sceneName.ToLowerInvariant();  
 
-        string upper = sceneName.ToUpperInvariant();
+    string[] excluded =  
+    {  
+        "intro",  
+        "bootstrap",  
+        "mainmenu",  
+        "main_menu",  
+        "menu",  
+        "loading",  
+        "loader",  
+        "credits",  
+        "options",  
+        "settings",  
+        "title"  
+    };  
 
-        if (upper.Contains("P-1") || upper.Contains("P-2"))
-            return true;
+    foreach (string word in excluded)  
+    {  
+        if (lower.Contains(word))  
+            return false;  
+    }  
 
-        for (int i = 0; i + 2 < upper.Length; i++)
-        {
-            if (char.IsDigit(upper[i]) &&
-                upper[i + 1] == '-' &&
-                char.IsDigit(upper[i + 2]))
-                return true;
-        }
+    for (int i = 0; i + 2 < sceneName.Length; i++)  
+    {  
+        if (char.IsDigit(sceneName[i]) &&  
+            sceneName[i + 1] == '-' &&  
+            char.IsDigit(sceneName[i + 2]))  
+        {  
+            return true;  
+        }  
+    }  
 
-        return false;
-    }
+    string upper = sceneName.ToUpperInvariant();  
 
-    private bool TryLoadModel()
-    {
-        try
-        {
-            Scene scene = SceneManager.GetActiveScene();
+    if (upper.Contains("P-1") || upper.Contains("P-2"))  
+        return true;  
 
-            if (!IsGameplayScene(scene.name ?? "", scene.isLoaded))
-                return false;
+    return false;  
+}  
 
-            Camera camera = Camera.main;
+private bool TryLoadModel()  
+{  
+    try  
+    {  
+        Scene scene = SceneManager.GetActiveScene();  
+        string sceneName = scene.name ?? "";  
 
-            if (camera == null)
-            {
-                LogWarning("[BladesOfChaos] No camera found.");
-                return false;
-            }
+        if (!IsGameplayScene(sceneName, scene.isLoaded))  
+            return false;  
 
-            string folder = Path.Combine(
-                Paths.PluginPath,
-                "ULTRADROID.BladesOfChaos");
+        Camera camera = Camera.main;  
 
-            string path = Path.Combine(
-                folder,
-                "blades_of_chaos_god.glb");
+        if (camera == null)  
+            camera = UnityEngine.Object.FindObjectOfType<Camera>();  
 
-            if (!File.Exists(path))
-            {
-                LogWarning("[BladesOfChaos] GLB file was not found: " + path);
-                return false;
-            }
+        if (camera == null)  
+        {  
+            LogWarning("[BladesOfChaos] No camera found.");  
+            return false;  
+        }  
 
-            ModelLoadOptions options = new ModelLoadOptions
-            {
-                Name = "ULTRADROID_BladesOfChaos",
-                Position = new Vector3(0.05f, -0.65f, 1f),
-                RotationEuler = Vector3.zero,
-                Scale = new Vector3(0.03f, 0.03f, 0.03f),
-                LoadTextures = true,
-                CreateColliders = false
-            };
+        string folder = Path.Combine(  
+            Paths.PluginPath,  
+            "ULTRADROID.BladesOfChaos"  
+        );  
 
-            GameObject result = ModelAPI.LoadGLB(
-                path,
-                camera.transform,
-                options);
+        string path = Path.Combine(  
+            folder,  
+            "blades_of_chaos_god.glb"  
+        );  
 
-            if (result == null)
-            {
-                LogError("[BladesOfChaos] LoadGLB returned null.");
-                return false;
-            }
+        if (!File.Exists(path))  
+        {  
+            LogWarning(  
+                "[BladesOfChaos] GLB file was not found: " + path);  
+            return false;  
+        }  
 
-            Log("[BladesOfChaos] Model loaded: " + result.name);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogError("[BladesOfChaos] Model loading failed:");
-            LogError(ex.ToString());
-            return false;
-        }
-    }
+        var options = new ModelLoadOptions  
+        {  
+            Name = "ULTRADROID_BladesOfChaos",  
+            Position = new Vector3(0.05f, -0.65f, 1.0f),  
+            RotationEuler = Vector3.zero,  
+            Scale = new Vector3(0.03f, 0.03f, 0.03f),  
 
-    private static void Log(string message)
-    {
-        if (DiagLog != null)
-            DiagLog.LogInfo(message);
-    }
+            LoadTextures = true,  
+            CreateColliders = false,  
 
-    private static void LogWarning(string message)
-    {
-        if (DiagLog != null)
-            DiagLog.LogWarning(message);
-    }
+            // This model uses its own UV V-flip setting.  
+            FlipUvV = true  
+        };  
 
-    private static void LogError(string message)
-    {
-        if (DiagLog != null)
-            DiagLog.LogError(message);
-    }
+        GameObject result = ModelAPI.LoadGLB(  
+            path,  
+            camera.transform,  
+            options  
+        );  
+
+        if (result == null)  
+        {  
+            LogError("[BladesOfChaos] LoadGLB returned null.");  
+            return false;  
+        }  
+
+        Log("[BladesOfChaos] Model loaded: " + result.name);  
+        return true;  
+    }  
+    catch (Exception ex)  
+    {  
+        LogError("[BladesOfChaos] Model loading failed:");  
+        LogError(ex.ToString());  
+        return false;  
+    }  
+}  
+
+private static void Log(string message)  
+{  
+    if (BladesOfChaosPlugin.DiagLog != null)  
+        BladesOfChaosPlugin.DiagLog.LogInfo(message);  
+}  
+
+private static void LogWarning(string message)  
+{  
+    if (BladesOfChaosPlugin.DiagLog != null)  
+        BladesOfChaosPlugin.DiagLog.LogWarning(message);  
+}  
+
+private static void LogError(string message)  
+{  
+    if (BladesOfChaosPlugin.DiagLog != null)  
+        BladesOfChaosPlugin.DiagLog.LogError(message);  
+}
+
 }
