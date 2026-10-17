@@ -1,778 +1,1567 @@
-
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Text;
+using BepInEx.Logging;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using UnityEngine;
 
 namespace ULTRADROID.Models
 {
-    internal static class GlbManualJsonParser
+    public sealed class ModelLoadOptions
     {
-        private sealed class Reader
+        public string Name = "ULTRADROID_Model";
+        public Vector3 Position = Vector3.zero;
+        public Vector3 RotationEuler = Vector3.zero;
+        public Vector3 Scale = Vector3.one;
+        public bool LoadTextures = true;
+        public bool CreateColliders = false;
+    }
+
+    public static class ModelAPI
+    {
+        public const string Version = "0.1.5-uv-diagnostics";
+
+        private static readonly ManualLogSource DiagnosticLog =
+            BepInEx.Logging.Logger.CreateLogSource(
+                "ULTRADROID Models API Diagnostics");
+
+        private static void Log(string message)
         {
-            private readonly string s;
-            private int p;
+            DiagnosticLog.LogInfo("[ULTRADROID Models] " + message);
+        }
 
-            public Reader(string text)
+        private static void LogError(string message, Exception ex)
+        {
+            DiagnosticLog.LogError(
+                "[ULTRADROID Models] " + message + "\n" + ex);
+        }
+
+        public static GameObject LoadGLB(
+            string path,
+            Transform parent = null,
+            ModelLoadOptions options = null)
+        {
+            Log("LoadGLB ENTER");
+
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentException(
+                    "A GLB path is required.", "path");
+
+            if (!File.Exists(path))
+                throw new FileNotFoundException(
+                    "GLB file was not found.", path);
+
+            options = options ?? new ModelLoadOptions();
+
+            Log("Reading GLB: " + path);
+
+            byte[] fileBytes = File.ReadAllBytes(path);
+
+            Log("File read complete. Bytes=" + fileBytes.Length);
+
+            GlbDocument doc;
+
+            try
             {
-                s = text ?? throw new ArgumentNullException("text");
+                doc = GlbDocument.Parse(fileBytes);
+            }
+            catch (Exception ex)
+            {
+                LogError("GLB parsing failed", ex);
+                throw;
             }
 
-            private void White()
-            {
-                while (p < s.Length && char.IsWhiteSpace(s[p]))
-                    p++;
-            }
-
-            private char Peek()
-            {
-                White();
-                return p < s.Length ? s[p] : '\0';
-            }
-
-            private void Expect(char c)
-            {
-                White();
-
-                if (p >= s.Length || s[p] != c)
-                    throw new InvalidDataException(
-                        "Expected '" + c + "' at JSON position " + p);
-
-                p++;
-            }
-
-            public object ReadValue()
-            {
-                White();
-
-                if (p >= s.Length)
-                    throw new InvalidDataException(
-                        "Unexpected end of JSON.");
-
-                char c = s[p];
-
-                if (c == '{') return ReadObject();
-                if (c == '[') return ReadArray();
-                if (c == '"') return ReadString();
-
-                if (c == '-' || (c >= '0' && c <= '9'))
-                    return ReadNumber();
-
-                if (Match("true")) return true;
-                if (Match("false")) return false;
-                if (Match("null")) return null;
-
+            if (doc == null || doc.json == null)
                 throw new InvalidDataException(
-                    "Invalid JSON token at position " + p);
+                    "GLB parser returned an empty document.");
+
+            Log("Document counts: nodes=" + Count(doc.json.nodes) +
+                ", meshes=" + Count(doc.json.meshes) +
+                ", accessors=" + Count(doc.json.accessors) +
+                ", bufferViews=" + Count(doc.json.bufferViews) +
+                ", materials=" + Count(doc.json.materials) +
+                ", textures=" + Count(doc.json.textures) +
+                ", images=" + Count(doc.json.images) +
+                ", binaryBytes=" + doc.binary.Length);
+
+            GameObject root = new GameObject(
+                string.IsNullOrEmpty(options.Name)
+                    ? Path.GetFileNameWithoutExtension(path)
+                    : options.Name);
+
+            try
+            {
+                if (parent != null)
+                    root.transform.SetParent(parent, false);
+
+                root.transform.localPosition = options.Position;
+
+                root.transform.localRotation =
+                    Quaternion.Euler(options.RotationEuler);
+
+                root.transform.localScale = options.Scale;
+
+                Texture2D[] textures =
+                    BuildTextures(doc, options.LoadTextures);
+
+                Material[] materials =
+                    BuildMaterials(doc, textures);
+
+                BuildScene(
+                    doc,
+                    root.transform,
+                    materials,
+                    options.CreateColliders);
+
+                Log("LoadGLB SUCCESS");
+
+                return root;
+            }
+            catch (Exception ex)
+            {
+                LogError(
+                    "LoadGLB failed while building the model", ex);
+
+                UnityEngine.Object.Destroy(root);
+
+                throw;
+            }
+        }
+
+        private static int Count<T>(T[] array)
+        {
+            return array == null ? 0 : array.Length;
+        }
+
+        private static Texture2D[] BuildTextures(
+            GlbDocument doc,
+            bool load)
+        {
+            int count = Count(doc.json.images);
+
+            Texture2D[] result = new Texture2D[count];
+
+            Log("[TEXTURE DIAG] BuildTextures started.");
+            Log("[TEXTURE DIAG] Images=" + count +
+                ", enabled=" + load);
+
+            if (!load || count == 0)
+            {
+                Log("[TEXTURE DIAG] Skipped. Enabled=" + load +
+                    ", imageCount=" + count);
+
+                return result;
             }
 
-            private bool Match(string word)
+            for (int i = 0; i < count; i++)
             {
-                if (p + word.Length > s.Length)
-                    return false;
+                GltfImage image = doc.json.images[i];
 
-                if (string.CompareOrdinal(
-                    s, p, word, 0, word.Length) != 0)
-                    return false;
-
-                p += word.Length;
-                return true;
-            }
-
-            private Dictionary<string, object> ReadObject()
-            {
-                var result = new Dictionary<string, object>(
-                    StringComparer.Ordinal);
-
-                Expect('{');
-
-                if (Peek() == '}')
+                if (image == null)
                 {
-                    p++;
-                    return result;
+                    Log("[TEXTURE DIAG] Image " + i + " is null.");
+                    continue;
                 }
 
-                while (true)
+                Log("[TEXTURE DIAG] Image " + i +
+                    ": bufferView=" + image.bufferView +
+                    ", mimeType=" + (image.mimeType ?? "<null>"));
+
+                if (image.bufferView < 0 ||
+                    doc.json.bufferViews == null ||
+                    image.bufferView >= doc.json.bufferViews.Length)
                 {
-                    White();
+                    Log("[TEXTURE DIAG] Image " + i +
+                        " skipped: invalid bufferView. " +
+                        "Embedded GLB images only.");
 
-                    if (Peek() != '"')
-                        throw new InvalidDataException(
-                            "Expected JSON object key at position " + p);
+                    continue;
+                }
 
-                    string key = ReadString();
-                    Expect(':');
+                byte[] bytes;
 
-                    if (result.ContainsKey(key))
-                        throw new InvalidDataException(
-                            "Duplicate JSON key: " + key);
+                try
+                {
+                    bytes = doc.ReadBufferView(image.bufferView);
+                }
+                catch (Exception ex)
+                {
+                    LogError(
+                        "[TEXTURE DIAG] Image " + i +
+                        ": failed to extract bytes.", ex);
 
-                    result.Add(key, ReadValue());
+                    continue;
+                }
 
-                    char next = Peek();
+                if (bytes == null || bytes.Length == 0)
+                {
+                    Log("[TEXTURE DIAG] Image " + i +
+                        ": extracted image data is empty.");
 
-                    if (next == '}')
+                    continue;
+                }
+
+                Log("[TEXTURE DIAG] Image " + i +
+                    ": extracted " + bytes.Length + " bytes.");
+
+                Texture2D texture = null;
+
+                try
+                {
+                    texture = new Texture2D(
+                        2, 2, TextureFormat.RGBA32, true);
+
+                    bool loaded =
+                        ImageConversion.LoadImage(
+                            texture, bytes, false);
+
+                    Log("[TEXTURE DIAG] Image " + i +
+                        ": LoadImage returned " + loaded);
+
+                    if (!loaded)
                     {
-                        p++;
-                        return result;
-                    }
-
-                    Expect(',');
-                }
-            }
-
-            private List<object> ReadArray()
-            {
-                var result = new List<object>();
-
-                Expect('[');
-
-                if (Peek() == ']')
-                {
-                    p++;
-                    return result;
-                }
-
-                while (true)
-                {
-                    result.Add(ReadValue());
-
-                    char next = Peek();
-
-                    if (next == ']')
-                    {
-                        p++;
-                        return result;
-                    }
-
-                    Expect(',');
-                }
-            }
-
-            private string ReadString()
-            {
-                Expect('"');
-
-                var result = new StringBuilder();
-
-                while (p < s.Length)
-                {
-                    char c = s[p++];
-
-                    if (c == '"')
-                        return result.ToString();
-
-                    if (c < 0x20)
-                        throw new InvalidDataException(
-                            "Unescaped control character in JSON string.");
-
-                    if (c != '\\')
-                    {
-                        result.Append(c);
+                        UnityEngine.Object.Destroy(texture);
                         continue;
                     }
 
-                    if (p >= s.Length)
-                        throw new InvalidDataException(
-                            "Incomplete JSON escape.");
+                    texture.name = "ULTRADROID_GLTF_Image_" + i;
+                    texture.wrapMode = TextureWrapMode.Repeat;
+                    texture.filterMode = FilterMode.Bilinear;
 
-                    char e = s[p++];
+                    result[i] = texture;
 
-                    switch (e)
-                    {
-                        case '"': result.Append('"'); break;
-                        case '\\': result.Append('\\'); break;
-                        case '/': result.Append('/'); break;
-                        case 'b': result.Append('\b'); break;
-                        case 'f': result.Append('\f'); break;
-                        case 'n': result.Append('\n'); break;
-                        case 'r': result.Append('\r'); break;
-                        case 't': result.Append('\t'); break;
-
-                        case 'u':
-                            if (p + 4 > s.Length)
-                                throw new InvalidDataException(
-                                    "Incomplete Unicode escape.");
-
-                            int code;
-
-                            if (!int.TryParse(
-                                s.Substring(p, 4),
-                                NumberStyles.HexNumber,
-                                CultureInfo.InvariantCulture,
-                                out code))
-                            {
-                                throw new InvalidDataException(
-                                    "Invalid Unicode escape.");
-                            }
-
-                            result.Append((char)code);
-                            p += 4;
-                            break;
-
-                        default:
-                            throw new InvalidDataException(
-                                "Invalid JSON escape: \\" + e);
-                    }
+                    Log("[TEXTURE DIAG] Image " + i +
+                        ": loaded successfully; dimensions=" +
+                        texture.width + "x" + texture.height);
                 }
+                catch (Exception ex)
+                {
+                    LogError(
+                        "[TEXTURE DIAG] Image " + i +
+                        ": texture creation or decoding failed.", ex);
 
-                throw new InvalidDataException(
-                    "Unterminated JSON string.");
+                    if (texture != null)
+                        UnityEngine.Object.Destroy(texture);
+                }
             }
 
-            private double ReadNumber()
+            Log("[TEXTURE DIAG] BuildTextures finished: " +
+                CountLoadedTextures(result) + "/" + count +
+                " images loaded.");
+
+            return result;
+        }
+
+        private static Material[] BuildMaterials(
+            GlbDocument doc,
+            Texture2D[] textures)
+        {
+            int count = Count(doc.json.materials);
+
+            Material[] result = new Material[count + 1];
+
+            Log("[MATERIAL DIAG] Starting. Materials=" + count +
+                ", loadedTextures=" + CountLoadedTextures(textures));
+
+            Shader shader = Shader.Find("Standard");
+
+            if (shader == null)
+                shader = Shader.Find("Universal Render Pipeline/Lit");
+
+            if (shader == null)
+                shader = Shader.Find("Sprites/Default");
+
+            if (shader == null)
+                throw new InvalidOperationException(
+                    "No compatible Unity shader was found.");
+
+            Log("[MATERIAL DIAG] Selected shader: " + shader.name);
+
+            for (int i = 0; i < count; i++)
             {
-                int start = p;
+                GltfMaterial source = doc.json.materials[i];
 
-                if (s[p] == '-')
-                    p++;
-
-                if (p >= s.Length)
-                    throw new InvalidDataException(
-                        "Invalid JSON number.");
-
-                if (s[p] == '0')
+                if (source == null)
                 {
-                    p++;
+                    Log("[MATERIAL DIAG] Material " + i + " is null.");
+                    continue;
+                }
+
+                Material material = new Material(shader);
+
+                material.name = string.IsNullOrEmpty(source.name)
+                    ? "GLTF_Material_" + i
+                    : source.name;
+
+                PbrMetallicRoughness pbr =
+                    source.pbrMetallicRoughness;
+
+                if (pbr != null)
+                {
+                    if (pbr.baseColorFactor != null &&
+                        pbr.baseColorFactor.Length >= 4)
+                    {
+                        material.color = new Color(
+                            pbr.baseColorFactor[0],
+                            pbr.baseColorFactor[1],
+                            pbr.baseColorFactor[2],
+                            pbr.baseColorFactor[3]);
+                    }
+
+                    if (pbr.baseColorTexture != null)
+                    {
+                        int textureIndex =
+                            pbr.baseColorTexture.index;
+
+                        int imageIndex =
+                            GetImageIndex(doc, textureIndex);
+
+                        Log("[MATERIAL DIAG] Material " + i +
+                            ": textureIndex=" + textureIndex +
+                            ", imageIndex=" + imageIndex);
+
+                        if (imageIndex >= 0 &&
+                            imageIndex < textures.Length &&
+                            textures[imageIndex] != null)
+                        {
+                            Texture2D texture = textures[imageIndex];
+
+                            bool assigned = false;
+
+                            if (material.HasProperty("_MainTex"))
+                            {
+                                material.SetTexture(
+                                    "_MainTex", texture);
+
+                                assigned = true;
+                            }
+
+                            if (material.HasProperty("_BaseMap"))
+                            {
+                                material.SetTexture(
+                                    "_BaseMap", texture);
+
+                                assigned = true;
+                            }
+
+                            Log("[MATERIAL DIAG] Material " + i +
+                                ": texture=" + texture.name +
+                                ", shader=" + material.shader.name +
+                                ", assigned=" + assigned);
+                        }
+                        else
+                        {
+                            Log("[MATERIAL DIAG] Material " + i +
+                                ": image index invalid or texture missing.");
+                        }
+                    }
+                    else
+                    {
+                        Log("[MATERIAL DIAG] Material " + i +
+                            ": no baseColorTexture defined.");
+                    }
+
+                    if (material.HasProperty("_Metallic"))
+                    {
+                        material.SetFloat(
+                            "_Metallic", pbr.metallicFactor);
+                    }
+
+                    if (material.HasProperty("_Glossiness"))
+                    {
+                        material.SetFloat(
+                            "_Glossiness",
+                            1f - pbr.roughnessFactor);
+                    }
                 }
                 else
                 {
-                    if (s[p] < '1' || s[p] > '9')
-                        throw new InvalidDataException(
-                            "Invalid JSON number.");
-
-                    while (p < s.Length &&
-                           s[p] >= '0' && s[p] <= '9')
-                        p++;
+                    Log("[MATERIAL DIAG] Material " + i +
+                        ": PBR data is missing.");
                 }
 
-                if (p < s.Length && s[p] == '.')
+                if (source.emissiveFactor != null &&
+                    source.emissiveFactor.Length >= 3 &&
+                    material.HasProperty("_EmissionColor"))
                 {
-                    p++;
+                    Color emission = new Color(
+                        source.emissiveFactor[0],
+                        source.emissiveFactor[1],
+                        source.emissiveFactor[2]);
 
-                    int fractionStart = p;
+                    material.EnableKeyword("_EMISSION");
 
-                    while (p < s.Length &&
-                           s[p] >= '0' && s[p] <= '9')
-                        p++;
-
-                    if (p == fractionStart)
-                        throw new InvalidDataException(
-                            "Invalid JSON fractional number.");
+                    material.SetColor(
+                        "_EmissionColor", emission);
                 }
 
-                if (p < s.Length &&
-                    (s[p] == 'e' || s[p] == 'E'))
-                {
-                    p++;
+                result[i] = material;
 
-                    if (p < s.Length &&
-                        (s[p] == '+' || s[p] == '-'))
-                        p++;
-
-                    int exponentStart = p;
-
-                    while (p < s.Length &&
-                           s[p] >= '0' && s[p] <= '9')
-                        p++;
-
-                    if (p == exponentStart)
-                        throw new InvalidDataException(
-                            "Invalid JSON exponent.");
-                }
-
-                double value;
-
-                if (!double.TryParse(
-                    s.Substring(start, p - start),
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out value))
-                {
-                    throw new InvalidDataException(
-                        "Could not parse JSON number.");
-                }
-
-                if (double.IsNaN(value) ||
-                    double.IsInfinity(value))
-                    throw new InvalidDataException(
-                        "Non-finite JSON number.");
-
-                return value;
+                Log("[MATERIAL DIAG] Material " + i +
+                    " ready: " + material.name);
             }
 
-            public void RequireEnd()
+            result[count] = new Material(shader)
             {
-                White();
+                name = "GLTF_Default_Material"
+            };
 
-                if (p != s.Length)
-                    throw new InvalidDataException(
-                        "Unexpected trailing JSON data at position " + p);
-            }
-        }
-
-        private static Dictionary<string, object> Obj(object value)
-        {
-            return value as Dictionary<string, object>;
-        }
-
-        private static List<object> Arr(object value)
-        {
-            return value as List<object>;
-        }
-
-        private static object Get(
-            Dictionary<string, object> obj,
-            string key)
-        {
-            object value;
-
-            return obj != null && obj.TryGetValue(key, out value)
-                ? value
-                : null;
-        }
-
-        private static int Int(
-            Dictionary<string, object> obj,
-            string key,
-            int fallback = 0)
-        {
-            object value = Get(obj, key);
-
-            if (value == null)
-                return fallback;
-
-            if (!(value is double))
-                throw new InvalidDataException(
-                    "Expected integer field: " + key);
-
-            double number = (double)value;
-
-            if (number != Math.Truncate(number) ||
-                number < int.MinValue ||
-                number > int.MaxValue)
-            {
-                throw new InvalidDataException(
-                    "Invalid integer field: " + key);
-            }
-
-            return (int)number;
-        }
-
-        private static string Str(
-            Dictionary<string, object> obj,
-            string key,
-            string fallback = null)
-        {
-            object value = Get(obj, key);
-
-            if (value == null)
-                return fallback;
-
-            string result = value as string;
-
-            if (result == null)
-                throw new InvalidDataException(
-                    "Expected string field: " + key);
+            Log("[MATERIAL DIAG] Created fallback material.");
 
             return result;
         }
 
-        private static bool Bool(
-            Dictionary<string, object> obj,
-            string key,
-            bool fallback = false)
+        private static int CountLoadedTextures(Texture2D[] textures)
         {
-            object value = Get(obj, key);
+            int count = 0;
 
-            if (value == null)
-                return fallback;
+            if (textures == null)
+                return 0;
 
-            if (!(value is bool))
-                throw new InvalidDataException(
-                    "Expected boolean field: " + key);
-
-            return (bool)value;
-        }
-
-        private static float[] Floats(
-            object value,
-            string field)
-        {
-            if (value == null)
-                return null;
-
-            List<object> array = Arr(value);
-
-            if (array == null)
-                throw new InvalidDataException(
-                    "Expected numeric array: " + field);
-
-            float[] result = new float[array.Count];
-
-            for (int i = 0; i < array.Count; i++)
+            for (int i = 0; i < textures.Length; i++)
             {
-                if (!(array[i] is double))
-                    throw new InvalidDataException(
-                        "Expected number in " + field);
-
-                double number = (double)array[i];
-
-                if (number < -float.MaxValue ||
-                    number > float.MaxValue)
-                    throw new InvalidDataException(
-                        "Number outside float range in " + field);
-
-                result[i] = (float)number;
+                if (textures[i] != null)
+                    count++;
             }
 
-            return result;
+            return count;
         }
 
-        private static int[] Ints(
-            object value,
-            string field)
+        private static int GetImageIndex(
+            GlbDocument doc,
+            int textureIndex)
         {
-            if (value == null)
-                return null;
-
-            List<object> array = Arr(value);
-
-            if (array == null)
-                throw new InvalidDataException(
-                    "Expected integer array: " + field);
-
-            int[] result = new int[array.Count];
-
-            for (int i = 0; i < array.Count; i++)
+            if (doc.json.textures == null ||
+                textureIndex < 0 ||
+                textureIndex >= doc.json.textures.Length)
             {
-                if (!(array[i] is double))
-                    throw new InvalidDataException(
-                        "Expected integer in " + field);
+                Log("[MATERIAL DIAG] Invalid texture index: " +
+                    textureIndex);
 
-                double number = (double)array[i];
+                return -1;
+            }
 
-                if (number != Math.Truncate(number) ||
-                    number < int.MinValue ||
-                    number > int.MaxValue)
+            GltfTexture texture =
+                doc.json.textures[textureIndex];
+
+            if (texture == null)
+            {
+                Log("[MATERIAL DIAG] Texture entry " +
+                    textureIndex + " is null.");
+
+                return -1;
+            }
+
+            Log("[MATERIAL DIAG] Texture " + textureIndex +
+                " references image " + texture.source);
+
+            return texture.source;
+        }
+
+        private static void BuildScene(
+            GlbDocument doc,
+            Transform root,
+            Material[] materials,
+            bool colliders)
+        {
+            if (doc.json.nodes == null ||
+                doc.json.nodes.Length == 0)
+            {
+                Log("No nodes found in glTF scene.");
+                return;
+            }
+
+            int sceneIndex = doc.json.scene;
+
+            int[] roots = null;
+
+            if (doc.json.scenes != null &&
+                doc.json.scenes.Length > 0)
+            {
+                if (sceneIndex < 0 ||
+                    sceneIndex >= doc.json.scenes.Length)
                 {
-                    throw new InvalidDataException(
-                        "Invalid integer in " + field);
+                    sceneIndex = 0;
                 }
 
-                result[i] = (int)number;
+                GltfScene scene =
+                    doc.json.scenes[sceneIndex];
+
+                if (scene != null)
+                    roots = scene.nodes;
             }
 
-            return result;
-        }
-
-        private static T[] Array<T>(
-            object value,
-            string field,
-            Func<object, T> convert)
-        {
-            if (value == null)
-                return null;
-
-            List<object> source = Arr(value);
-
-            if (source == null)
-                throw new InvalidDataException(
-                    "Expected array: " + field);
-
-            T[] result = new T[source.Count];
-
-            for (int i = 0; i < source.Count; i++)
-                result[i] = convert(source[i]);
-
-            return result;
-        }
-
-        private static float FloatValue(
-            Dictionary<string, object> obj,
-            string key,
-            float fallback)
-        {
-            object value = Get(obj, key);
-
-            if (value == null)
-                return fallback;
-
-            if (!(value is double))
-                throw new InvalidDataException(
-                    "Expected number field: " + key);
-
-            double number = (double)value;
-
-            if (number < -float.MaxValue ||
-                number > float.MaxValue)
-                throw new InvalidDataException(
-                    "Number outside float range: " + key);
-
-            return (float)number;
-        }
-
-        public static GltfRoot ParseRoot(string text)
-        {
-            var reader = new Reader(text);
-            object parsed = reader.ReadValue();
-            reader.RequireEnd();
-
-            Dictionary<string, object> obj = Obj(parsed);
-
-            if (obj == null)
-                throw new InvalidDataException(
-                    "glTF JSON root must be an object.");
-
-            var root = new GltfRoot();
-
-            Dictionary<string, object> asset =
-                Obj(Get(obj, "asset"));
-
-            if (asset != null)
+            if (roots == null || roots.Length == 0)
             {
-                root.asset = new GltfAsset
+                HashSet<int> childIndices =
+                    new HashSet<int>();
+
+                foreach (GltfNode node in doc.json.nodes)
                 {
-                    version = Str(asset, "version")
-                };
-            }
-
-            root.scene = Int(obj, "scene", 0);
-
-            root.scenes = Array(
-                Get(obj, "scenes"),
-                "scenes",
-                value =>
-                {
-                    var o = Obj(value);
-
-                    if (o == null)
-                        throw new InvalidDataException(
-                            "Invalid scene entry.");
-
-                    return new GltfScene
+                    if (node == null ||
+                        node.children == null)
                     {
-                        nodes = Ints(
-                            Get(o, "nodes"), "scenes.nodes")
-                    };
-                });
-
-            root.nodes = Array(
-                Get(obj, "nodes"),
-                "nodes",
-                value =>
-                {
-                    var o = Obj(value);
-
-                    if (o == null)
-                        throw new InvalidDataException(
-                            "Invalid node entry.");
-
-                    return new GltfNode
-                    {
-                        name = Str(o, "name"),
-                        mesh = Int(o, "mesh", -1),
-                        children = Ints(
-                            Get(o, "children"), "nodes.children"),
-                        translation = Floats(
-                            Get(o, "translation"), "nodes.translation"),
-                        rotation = Floats(
-                            Get(o, "rotation"), "nodes.rotation"),
-                        scale = Floats(
-                            Get(o, "scale"), "nodes.scale"),
-                        matrix = Floats(
-                            Get(o, "matrix"), "nodes.matrix")
-                    };
-                });
-
-            root.meshes = Array(
-                Get(obj, "meshes"),
-                "meshes",
-                value =>
-                {
-                    var o = Obj(value);
-
-                    if (o == null)
-                        throw new InvalidDataException(
-                            "Invalid mesh entry.");
-
-                    return new GltfMesh
-                    {
-                        name = Str(o, "name"),
-                        primitives = Array(
-                            Get(o, "primitives"),
-                            "meshes.primitives",
-                            primitiveValue =>
-                            {
-                                var primitive = Obj(primitiveValue);
-
-                                if (primitive == null)
-                                    throw new InvalidDataException(
-                                        "Invalid primitive.");
-
-                                var attributes = new GltfAttributes();
-                                var attributeObject =
-                                    Obj(Get(primitive, "attributes"));
-
-                                if (attributeObject != null)
-                                {
-                                    attributes.POSITION =
-                                        Int(attributeObject, "POSITION", -1);
-                                    attributes.NORMAL =
-                                        Int(attributeObject, "NORMAL", -1);
-                                    attributes.TANGENT =
-                                        Int(attributeObject, "TANGENT", -1);
-                                    attributes.TEXCOORD_0 =
-                                        Int(attributeObject, "TEXCOORD_0", -1);
-                                }
-
-                                return new GltfPrimitive
-                                {
-                                    attributes = attributes,
-                                    indices = Int(
-                                        primitive, "indices", -1),
-                                    material = Int(
-                                        primitive, "material", -1),
-                                    mode = Int(
-                                        primitive, "mode", 4)
-                                };
-                            })
-                    };
-                });
-
-            root.materials = Array(
-                Get(obj, "materials"),
-                "materials",
-                value =>
-                {
-                    var o = Obj(value);
-
-                    if (o == null)
-                        throw new InvalidDataException(
-                            "Invalid material entry.");
-
-                    var material = new GltfMaterial
-                    {
-                        name = Str(o, "name"),
-                        emissiveFactor = Floats(
-                            Get(o, "emissiveFactor"),
-                            "materials.emissiveFactor")
-                    };
-
-                    var pbr = Obj(
-                        Get(o, "pbrMetallicRoughness"));
-
-                    if (pbr != null)
-                    {
-                        var converted = new PbrMetallicRoughness
-                        {
-                            baseColorFactor = Floats(
-                                Get(pbr, "baseColorFactor"),
-                                "baseColorFactor"),
-                            metallicFactor = FloatValue(
-                                pbr, "metallicFactor", 1f),
-                            roughnessFactor = FloatValue(
-                                pbr, "roughnessFactor", 1f)
-                        };
-
-                        var baseTexture = Obj(
-                            Get(pbr, "baseColorTexture"));
-
-                        if (baseTexture != null)
-                        {
-                            converted.baseColorTexture =
-                                new GltfTextureInfo
-                                {
-                                    index = Int(
-                                        baseTexture, "index", -1)
-                                };
-                        }
-
-                        material.pbrMetallicRoughness = converted;
+                        continue;
                     }
 
-                    return material;
-                });
+                    foreach (int child in node.children)
+                        childIndices.Add(child);
+                }
 
-            root.textures = Array(
-                Get(obj, "textures"),
-                "textures",
-                value =>
+                List<int> inferredRoots =
+                    new List<int>();
+
+                for (int i = 0;
+                    i < doc.json.nodes.Length;
+                    i++)
                 {
-                    var o = Obj(value);
+                    if (!childIndices.Contains(i))
+                        inferredRoots.Add(i);
+                }
 
-                    if (o == null)
-                        throw new InvalidDataException(
-                            "Invalid texture entry.");
+                roots = inferredRoots.ToArray();
+            }
 
-                    return new GltfTexture
-                    {
-                        source = Int(o, "source", -1)
-                    };
-                });
+            Log("[SCENE DIAG] Root node count=" +
+                roots.Length);
 
-            root.images = Array(
-                Get(obj, "images"),
-                "images",
-                value =>
-                {
-                    var o = Obj(value);
+            HashSet<int> recursionGuard =
+                new HashSet<int>();
 
-                    if (o == null)
-                        throw new InvalidDataException(
-                            "Invalid image entry.");
-
-                    return new GltfImage
-                    {
-                        bufferView = Int(o, "bufferView", -1),
-                        mimeType = Str(o, "mimeType")
-                    };
-                });
-
-            root.bufferViews = Array(
-                Get(obj, "bufferViews"),
-                "bufferViews",
-                value =>
-                {
-                    var o = Obj(value);
-
-                    if (o == null)
-                        throw new InvalidDataException(
-                            "Invalid bufferView entry.");
-
-                    return new GltfBufferView
-                    {
-                        buffer = Int(o, "buffer", 0),
-                        byteOffset = Int(o, "byteOffset", 0),
-                        byteLength = Int(o, "byteLength", 0),
-                        byteStride = Int(o, "byteStride", 0)
-                    };
-                });
-
-            root.accessors = Array(
-                Get(obj, "accessors"),
-                "accessors",
-                value =>
-                {
-                    var o = Obj(value);
-
-                    if (o == null)
-                        throw new InvalidDataException(
-                            "Invalid accessor entry.");
-
-                    return new GltfAccessor
-                    {
-                        bufferView = Int(o, "bufferView", -1),
-                        byteOffset = Int(o, "byteOffset", 0),
-                        componentType = Int(o, "componentType", 0),
-                        count = Int(o, "count", 0),
-                        type = Str(o, "type"),
-                        normalized = Bool(o, "normalized", false)
-                    };
-                });
-
-            return root;
+            foreach (int nodeIndex in roots)
+            {
+                BuildNode(
+                    doc,
+                    nodeIndex,
+                    root,
+                    materials,
+                    colliders,
+                    recursionGuard);
+            }
         }
+
+        private static void BuildNode(
+            GlbDocument doc,
+            int index,
+            Transform parent,
+            Material[] materials,
+            bool colliders,
+            HashSet<int> guard)
+        {
+            if (index < 0 ||
+                index >= doc.json.nodes.Length ||
+                guard.Contains(index))
+            {
+                return;
+            }
+
+            GltfNode node = doc.json.nodes[index];
+
+            if (node == null)
+                return;
+
+            guard.Add(index);
+
+            GameObject gameObject = new GameObject(
+                string.IsNullOrEmpty(node.name)
+                    ? "GLTF_Node_" + index
+                    : node.name);
+
+            gameObject.transform.SetParent(parent, false);
+
+            ApplyNodeTransform(
+                gameObject.transform, node);
+
+            if (node.mesh >= 0 &&
+                doc.json.meshes != null &&
+                node.mesh < doc.json.meshes.Length)
+            {
+                GltfMesh mesh =
+                    doc.json.meshes[node.mesh];
+
+                if (mesh != null)
+                {
+                    Log("[SCENE DIAG] Node " + index +
+                        " uses mesh " + node.mesh);
+
+                    BuildMesh(
+                        doc,
+                        mesh,
+                        gameObject,
+                        materials,
+                        colliders);
+                }
+            }
+
+            if (node.children != null)
+            {
+                foreach (int child in node.children)
+                {
+                    BuildNode(
+                        doc,
+                        child,
+                        gameObject.transform,
+                        materials,
+                        colliders,
+                        guard);
+                }
+            }
+
+            guard.Remove(index);
+        }
+
+        private static void ApplyNodeTransform(
+            Transform transform,
+            GltfNode node)
+        {
+            if (node.matrix != null &&
+                node.matrix.Length == 16)
+            {
+                Matrix4x4 matrix = new Matrix4x4();
+
+                for (int row = 0; row < 4; row++)
+                {
+                    for (int column = 0; column < 4; column++)
+                    {
+                        matrix[row, column] =
+                            node.matrix[column * 4 + row];
+                    }
+                }
+
+                transform.localPosition =
+                    matrix.GetColumn(3);
+
+                transform.localRotation =
+                    matrix.rotation;
+
+                transform.localScale =
+                    matrix.lossyScale;
+
+                return;
+            }
+
+            if (node.translation != null &&
+                node.translation.Length >= 3)
+            {
+                transform.localPosition = new Vector3(
+                    node.translation[0],
+                    node.translation[1],
+                    node.translation[2]);
+            }
+
+            if (node.rotation != null &&
+                node.rotation.Length >= 4)
+            {
+                transform.localRotation = new Quaternion(
+                    node.rotation[0],
+                    node.rotation[1],
+                    node.rotation[2],
+                    node.rotation[3]);
+            }
+
+            if (node.scale != null &&
+                node.scale.Length >= 3)
+            {
+                transform.localScale = new Vector3(
+                    node.scale[0],
+                    node.scale[1],
+                    node.scale[2]);
+            }
+        }
+
+        private static void BuildMesh(
+            GlbDocument doc,
+            GltfMesh source,
+            GameObject gameObject,
+            Material[] materials,
+            bool colliders)
+        {
+            if (source.primitives == null ||
+                source.primitives.Length == 0)
+            {
+                return;
+            }
+
+            List<Vector3> vertices =
+                new List<Vector3>();
+
+            List<Vector3> normals =
+                new List<Vector3>();
+
+            List<Vector2> uv =
+                new List<Vector2>();
+
+            List<List<int>> submeshTriangles =
+                new List<List<int>>();
+
+            List<Material> submeshMaterials =
+                new List<Material>();
+
+            bool hasNormals = true;
+            bool hasUv = true;
+
+            foreach (GltfPrimitive primitive in source.primitives)
+            {
+                if (primitive == null ||
+                    primitive.attributes == null ||
+                    primitive.attributes.POSITION < 0)
+                {
+                    continue;
+                }
+
+                if (primitive.mode != 4)
+                {
+                    throw new InvalidDataException(
+                        "Only TRIANGLES primitives are supported.");
+                }
+
+                Vector3[] primitiveVertices =
+                    doc.ReadVector3(
+                        primitive.attributes.POSITION);
+
+                Vector3[] primitiveNormals = null;
+
+                if (primitive.attributes.NORMAL >= 0)
+                {
+                    primitiveNormals =
+                        doc.ReadVector3(
+                            primitive.attributes.NORMAL);
+                }
+
+                Vector2[] primitiveUv = null;
+
+                if (primitive.attributes.TEXCOORD_0 >= 0)
+                {
+                    primitiveUv =
+                        doc.ReadVector2(
+                            primitive.attributes.TEXCOORD_0);
+                }
+
+                Log("[MESH DIAG] Mesh=" + source.name +
+                    ", vertices=" + primitiveVertices.Length +
+                    ", normals=" +
+                    (primitiveNormals == null
+                        ? 0
+                        : primitiveNormals.Length) +
+                    ", UVs=" +
+                    (primitiveUv == null
+                        ? 0
+                        : primitiveUv.Length) +
+                    ", materialIndex=" + primitive.material);
+
+                // UV diagnostics: report the actual coordinate range.
+                // Coordinates outside 0..1 are not automatically invalid.
+                if (primitiveUv != null &&
+                    primitiveUv.Length > 0)
+                {
+                    Vector2 minUv = primitiveUv[0];
+                    Vector2 maxUv = primitiveUv[0];
+
+                    bool finiteUv = true;
+
+                    for (int i = 0; i < primitiveUv.Length; i++)
+                    {
+                        Vector2 value = primitiveUv[i];
+
+                        if (float.IsNaN(value.x) ||
+                            float.IsNaN(value.y) ||
+                            float.IsInfinity(value.x) ||
+                            float.IsInfinity(value.y))
+                        {
+                            finiteUv = false;
+                        }
+
+                        minUv = Vector2.Min(minUv, value);
+                        maxUv = Vector2.Max(maxUv, value);
+                    }
+
+                    Log("[UV DIAG] Mesh=" + source.name +
+                        ", count=" + primitiveUv.Length +
+                        ", min=(" + minUv.x + ", " + minUv.y + ")" +
+                        ", max=(" + maxUv.x + ", " + maxUv.y + ")" +
+                        ", first=(" + primitiveUv[0].x + ", " +
+                        primitiveUv[0].y + ")" +
+                        ", finite=" + finiteUv);
+                }
+                else
+                {
+                    Log("[UV DIAG] Mesh=" + source.name +
+                        " has no TEXCOORD_0 data.");
+                }
+
+                int vertexOffset = vertices.Count;
+
+                vertices.AddRange(primitiveVertices);
+
+                if (primitiveNormals == null ||
+                    primitiveNormals.Length !=
+                    primitiveVertices.Length)
+                {
+                    hasNormals = false;
+                }
+                else
+                {
+                    normals.AddRange(primitiveNormals);
+                }
+
+                if (primitiveUv == null ||
+                    primitiveUv.Length !=
+                    primitiveVertices.Length)
+                {
+                    hasUv = false;
+                }
+                else
+                {
+                    uv.AddRange(primitiveUv);
+                }
+
+                int[] indices = primitive.indices >= 0
+                    ? doc.ReadIndices(primitive.indices)
+                    : MakeSequential(primitiveVertices.Length);
+
+                List<int> triangles =
+                    new List<int>(indices.Length);
+
+                for (int i = 0; i + 2 < indices.Length; i += 3)
+                {
+                    int a = indices[i];
+                    int b = indices[i + 1];
+                    int c = indices[i + 2];
+
+                    if (a < 0 ||
+                        a >= primitiveVertices.Length ||
+                        b < 0 ||
+                        b >= primitiveVertices.Length ||
+                        c < 0 ||
+                        c >= primitiveVertices.Length)
+                    {
+                        throw new InvalidDataException(
+                            "Mesh index exceeds vertex count.");
+                    }
+
+                    triangles.Add(vertexOffset + a);
+                    triangles.Add(vertexOffset + b);
+                    triangles.Add(vertexOffset + c);
+                }
+
+                submeshTriangles.Add(triangles);
+
+                int materialIndex =
+                    primitive.material >= 0 &&
+                    primitive.material < materials.Length - 1
+                        ? primitive.material
+                        : materials.Length - 1;
+
+                submeshMaterials.Add(
+                    materials[materialIndex]);
+
+                Log("[MESH DIAG] Selected material slot=" +
+                    materialIndex + ", name=" +
+                    materials[materialIndex].name);
+            }
+
+            if (vertices.Count == 0)
+                return;
+
+            Mesh mesh = new Mesh();
+
+            mesh.name = string.IsNullOrEmpty(source.name)
+                ? gameObject.name + "_Mesh"
+                : source.name;
+
+            if (vertices.Count > 65535)
+            {
+                mesh.indexFormat =
+                    UnityEngine.Rendering.IndexFormat.UInt32;
+            }
+
+            Il2CppSystem.Collections.Generic.List<Vector3>
+                il2CppVertices =
+                    new Il2CppSystem.Collections.Generic.List<Vector3>();
+
+            foreach (Vector3 vertex in vertices)
+                il2CppVertices.Add(vertex);
+
+            mesh.SetVertices(il2CppVertices);
+
+            mesh.subMeshCount = submeshTriangles.Count;
+
+            for (int i = 0; i < submeshTriangles.Count; i++)
+            {
+                Il2CppStructArray<int> triangleArray =
+                    new Il2CppStructArray<int>(
+                        submeshTriangles[i].ToArray());
+
+                mesh.SetTriangles(
+                    triangleArray, i, false);
+            }
+
+            if (hasNormals &&
+                normals.Count == vertices.Count)
+            {
+                Il2CppSystem.Collections.Generic.List<Vector3>
+                    il2CppNormals =
+                        new Il2CppSystem.Collections.Generic.List<Vector3>();
+
+                foreach (Vector3 normal in normals)
+                    il2CppNormals.Add(normal);
+
+                mesh.SetNormals(il2CppNormals);
+            }
+            else
+            {
+                Log("[MESH DIAG] Normals missing or incomplete; " +
+                    "recalculating normals.");
+
+                mesh.RecalculateNormals();
+            }
+
+            if (hasUv && uv.Count == vertices.Count)
+            {
+                Il2CppSystem.Collections.Generic.List<Vector4>
+                    il2CppUv =
+                        new Il2CppSystem.Collections.Generic.List<Vector4>();
+
+                foreach (Vector2 coordinate in uv)
+                {
+                    il2CppUv.Add(new Vector4(
+                        coordinate.x,
+                        coordinate.y,
+                        0f,
+                        0f));
+                }
+
+                mesh.SetUVs(0, il2CppUv);
+
+                Log("[MESH DIAG] UV coordinates applied. Count=" +
+                    uv.Count);
+            }
+            else
+            {
+                Log("[MESH DIAG] UV coordinates missing or incomplete. " +
+                    "Texture mapping may not work.");
+            }
+
+            mesh.RecalculateBounds();
+
+            MeshFilter filter =
+                gameObject.AddComponent<MeshFilter>();
+
+            filter.sharedMesh = mesh;
+
+            MeshRenderer renderer =
+                gameObject.AddComponent<MeshRenderer>();
+
+            renderer.sharedMaterials =
+                new Il2CppReferenceArray<Material>(
+                    submeshMaterials.ToArray());
+
+            Log("[MESH DIAG] Renderer created. Mesh=" + mesh.name +
+                ", submeshes=" + mesh.subMeshCount +
+                ", materialSlots=" + submeshMaterials.Count);
+
+            // Diagnostic only:
+            // Inspect the selected materials and textures without
+            // replacing them or changing the model's appearance.
+            for (int i = 0; i < submeshMaterials.Count; i++)
+            {
+                Material material = submeshMaterials[i];
+
+                Texture mainTexture = material != null
+                    ? material.mainTexture
+                    : null;
+
+                Log("[TEXTURE TEST] Submesh=" + i +
+                    ", material=" +
+                    (material != null
+                        ? material.name
+                        : "NULL") +
+                    ", shader=" +
+                    (material != null &&
+                     material.shader != null
+                        ? material.shader.name
+                        : "NULL") +
+                    ", mainTexture=" +
+                    (mainTexture != null
+                        ? mainTexture.name
+                        : "NULL") +
+                    ", textureSize=" +
+                    (mainTexture != null
+                        ? mainTexture.width + "x" +
+                          mainTexture.height
+                        : "N/A"));
+            }
+
+            if (colliders)
+            {
+                MeshCollider collider =
+                    gameObject.AddComponent<MeshCollider>();
+
+                collider.sharedMesh = mesh;
+            }
+        }
+
+        private static int[] MakeSequential(int count)
+        {
+            int[] result = new int[count];
+
+            for (int i = 0; i < count; i++)
+                result[i] = i;
+
+            return result;
+        }
+    }
+
+    internal sealed class GlbDocument
+    {
+        internal GltfRoot json;
+        internal byte[] binary;
+
+        private static readonly ManualLogSource ParserLog =
+            BepInEx.Logging.Logger.CreateLogSource(
+                "ULTRADROID Models GLB Parser");
+
+        internal static GlbDocument Parse(byte[] file)
+        {
+            LogParse("Parse ENTER; bytes=" +
+                (file == null ? -1 : file.Length));
+
+            if (file == null || file.Length < 20)
+                throw new InvalidDataException(
+                    "File is too small to be a GLB.");
+
+            if (ReadU32(file, 0) != 0x46546C67)
+                throw new InvalidDataException(
+                    "Invalid GLB magic.");
+
+            if (ReadU32(file, 4) != 2)
+                throw new InvalidDataException(
+                    "Only GLB version 2 is supported.");
+
+            uint declaredLength = ReadU32(file, 8);
+
+            if (declaredLength != file.Length)
+            {
+                throw new InvalidDataException(
+                    "GLB length mismatch: declared=" +
+                    declaredLength + ", actual=" + file.Length);
+            }
+
+            byte[] jsonBytes = null;
+            byte[] binBytes = null;
+
+            int position = 12;
+            int chunkNumber = 0;
+
+            while (position + 8 <= file.Length)
+            {
+                uint chunkLength = ReadU32(file, position);
+                uint chunkType = ReadU32(file, position + 4);
+
+                position += 8;
+
+                if (chunkLength > file.Length - position)
+                {
+                    throw new InvalidDataException(
+                        "GLB chunk exceeds file length.");
+                }
+
+                LogParse("Chunk " + chunkNumber +
+                    ": type=0x" + chunkType.ToString("X8") +
+                    ", bytes=" + chunkLength);
+
+                if (chunkType == 0x4E4F534A)
+                {
+                    jsonBytes = new byte[(int)chunkLength];
+
+                    Buffer.BlockCopy(
+                        file, position,
+                        jsonBytes, 0,
+                        (int)chunkLength);
+                }
+                else if (chunkType == 0x004E4942)
+                {
+                    binBytes = new byte[(int)chunkLength];
+
+                    Buffer.BlockCopy(
+                        file, position,
+                        binBytes, 0,
+                        (int)chunkLength);
+                }
+
+                position += (int)chunkLength;
+                chunkNumber++;
+            }
+
+            if (jsonBytes == null)
+                throw new InvalidDataException(
+                    "GLB JSON chunk is missing.");
+
+            string jsonText =
+                Encoding.UTF8.GetString(jsonBytes)
+                    .TrimEnd('\0', ' ', '\r', '\n', '\t');
+
+            LogParse("JSON extracted; chars=" +
+                jsonText.Length);
+
+            GltfRoot root;
+
+            try
+            {
+                LogParse(
+                    "Parsing glTF JSON with manual parser.");
+
+                root = GlbManualJsonParser.ParseRoot(jsonText);
+            }
+            catch (Exception ex)
+            {
+                LogParseError(
+                    "Manual JSON parsing failed", ex);
+
+                throw;
+            }
+
+            if (root == null)
+                throw new InvalidDataException(
+                    "Manual JSON parser returned null.");
+
+            if (binBytes == null)
+                binBytes = new byte[0];
+
+            if (root.asset == null ||
+                root.asset.version != "2.0")
+            {
+                throw new InvalidDataException(
+                    "Missing or unsupported glTF asset version.");
+            }
+
+            LogParse("JSON parsed. Nodes=" +
+                Count(root.nodes) +
+                ", meshes=" + Count(root.meshes) +
+                ", accessors=" + Count(root.accessors) +
+                ", binaryBytes=" + binBytes.Length);
+
+            return new GlbDocument
+            {
+                json = root,
+                binary = binBytes
+            };
+        }
+
+        private static void LogParse(string message)
+        {
+            ParserLog.LogInfo("[GLB PARSER] " + message);
+        }
+
+        private static void LogParseError(
+            string message,
+            Exception ex)
+        {
+            ParserLog.LogError(
+                "[GLB PARSER] " + message + "\n" + ex);
+        }
+
+        internal byte[] ReadBufferView(int index)
+        {
+            GltfBufferView view = GetView(index);
+
+            byte[] result = new byte[view.byteLength];
+
+            Buffer.BlockCopy(
+                binary,
+                view.byteOffset,
+                result,
+                0,
+                view.byteLength);
+
+            return result;
+        }
+
+        internal Vector3[] ReadVector3(int accessorIndex)
+        {
+            float[] values = ReadFloats(accessorIndex, 3);
+
+            Vector3[] result =
+                new Vector3[values.Length / 3];
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                result[i] = new Vector3(
+                    values[i * 3],
+                    values[i * 3 + 1],
+                    values[i * 3 + 2]);
+            }
+
+            return result;
+        }
+
+        internal Vector2[] ReadVector2(int accessorIndex)
+        {
+            float[] values = ReadFloats(accessorIndex, 2);
+
+            Vector2[] result =
+                new Vector2[values.Length / 2];
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                result[i] = new Vector2(
+                    values[i * 2],
+                    values[i * 2 + 1]);
+            }
+
+            return result;
+        }
+
+        internal float[] ReadFloats(
+            int accessorIndex,
+            int components)
+        {
+            GltfAccessor accessor =
+                GetAccessor(accessorIndex);
+
+            if (accessor.componentType != 5126)
+            {
+                throw new InvalidDataException(
+                    "Expected FLOAT accessor for vector attributes.");
+            }
+
+            if (ComponentCount(accessor.type) != components)
+            {
+                throw new InvalidDataException(
+                    "Unexpected accessor type for vector attribute.");
+            }
+
+            GltfBufferView view =
+                GetView(accessor.bufferView);
+
+            int elementSize = components * 4;
+
+            int stride = view.byteStride > 0
+                ? view.byteStride
+                : elementSize;
+
+            if (stride < elementSize)
+            {
+                throw new InvalidDataException(
+                    "Accessor byte stride is too small.");
+            }
+
+            int start = checked(
+                view.byteOffset + accessor.byteOffset);
+
+            float[] result =
+                new float[checked(accessor.count * components)];
+
+            for (int i = 0; i < accessor.count; i++)
+            {
+                for (int c = 0; c < components; c++)
+                {
+                    int offset = checked(
+                        start + i * stride + c * 4);
+
+                    if (offset < 0 ||
+                        offset + 4 > binary.Length)
+                    {
+                        throw new InvalidDataException(
+                            "Vertex accessor exceeds binary data.");
+                    }
+
+                    result[i * components + c] =
+                        BitConverter.ToSingle(binary, offset);
+                }
+            }
+
+            return result;
+        }
+
+        internal int[] ReadIndices(int accessorIndex)
+        {
+            GltfAccessor accessor =
+                GetAccessor(accessorIndex);
+
+            if (accessor.type != "SCALAR")
+            {
+                throw new InvalidDataException(
+                    "Index accessor must be SCALAR.");
+            }
+
+            if (accessor.componentType == 5126)
+            {
+                throw new InvalidDataException(
+                    "Index accessor cannot use FLOAT.");
+            }
+
+            GltfBufferView view =
+                GetView(accessor.bufferView);
+
+            int elementSize =
+                accessor.componentType == 5121 ? 1 :
+                accessor.componentType == 5123 ? 2 :
+                accessor.componentType == 5125 ? 4 : 0;
+
+            if (elementSize == 0)
+            {
+                throw new InvalidDataException(
+                    "Unsupported index component type.");
+            }
+
+            int stride = view.byteStride > 0
+                ? view.byteStride
+                : elementSize;
+
+            if (stride < elementSize)
+            {
+                throw new InvalidDataException(
+                    "Index byte stride is too small.");
+            }
+
+            int start = checked(
+                view.byteOffset + accessor.byteOffset);
+
+            int[] result = new int[accessor.count];
+
+            for (int i = 0; i < accessor.count; i++)
+            {
+                int offset = checked(start + i * stride);
+
+                if (offset < 0 ||
+                    offset + elementSize > binary.Length)
+                {
+                    throw new InvalidDataException(
+                        "Index accessor exceeds binary data.");
+                }
+
+                if (elementSize == 1)
+                {
+                    result[i] = binary[offset];
+                }
+                else if (elementSize == 2)
+                {
+                    result[i] =
+                        BitConverter.ToUInt16(binary, offset);
+                }
+                else
+                {
+                    uint value =
+                        BitConverter.ToUInt32(binary, offset);
+
+                    if (value > int.MaxValue)
+                    {
+                        throw new InvalidDataException(
+                            "Index is too large.");
+                    }
+
+                    result[i] = (int)value;
+                }
+            }
+
+            return result;
+        }
+
+        private GltfAccessor GetAccessor(int index)
+        {
+            if (json.accessors == null ||
+                index < 0 ||
+                index >= json.accessors.Length)
+            {
+                throw new InvalidDataException(
+                    "Accessor index is invalid.");
+            }
+
+            GltfAccessor accessor =
+                json.accessors[index];
+
+            if (accessor == null)
+                throw new InvalidDataException(
+                    "Accessor entry is null.");
+
+            if (accessor.count < 0 ||
+                accessor.byteOffset < 0)
+            {
+                throw new InvalidDataException(
+                    "Accessor has a negative count or offset.");
+            }
+
+            return accessor;
+        }
+
+        private GltfBufferView GetView(int index)
+        {
+            if (json.bufferViews == null ||
+                index < 0 ||
+                index >= json.bufferViews.Length)
+            {
+                throw new InvalidDataException(
+                    "Buffer view index is invalid.");
+            }
+
+            GltfBufferView view =
+                json.bufferViews[index];
+
+            if (view == null)
+                throw new InvalidDataException(
+                    "Buffer view entry is null.");
+
+            if (view.byteOffset < 0 ||
+                view.byteLength < 0 ||
+                view.byteOffset > binary.Length ||
+                view.byteLength > binary.Length - view.byteOffset)
+            {
+                throw new InvalidDataException(
+                    "Buffer view is outside binary data.");
+            }
+
+            if (view.buffer != 0)
+            {
+                throw new InvalidDataException(
+                    "Only the embedded GLB binary buffer is supported.");
+            }
+
+            return view;
+        }
+
+        private static int ComponentCount(string type)
+        {
+            if (type == "SCALAR") return 1;
+            if (type == "VEC2") return 2;
+            if (type == "VEC3") return 3;
+            if (type == "VEC4") return 4;
+
+            throw new InvalidDataException(
+                "Unsupported accessor type: " + type);
+        }
+
+        private static int Count<T>(T[] array)
+        {
+            return array == null ? 0 : array.Length;
+        }
+
+        private static uint ReadU32(
+            byte[] bytes,
+            int offset)
+        {
+            return BitConverter.ToUInt32(bytes, offset);
+        }
+    }
+
+    [Serializable]
+    internal class GltfRoot
+    {
+        public GltfAsset asset;
+        public int scene;
+        public GltfScene[] scenes;
+        public GltfNode[] nodes;
+        public GltfMesh[] meshes;
+        public GltfMaterial[] materials;
+        public GltfTexture[] textures;
+        public GltfImage[] images;
+        public GltfBufferView[] bufferViews;
+        public GltfAccessor[] accessors;
+    }
+
+    [Serializable]
+    internal class GltfAsset
+    {
+        public string version;
+    }
+
+    [Serializable]
+    internal class GltfScene
+    {
+        public int[] nodes;
+    }
+
+    [Serializable]
+    internal class GltfNode
+    {
+        public string name;
+        public int mesh = -1;
+        public int[] children;
+        public float[] translation;
+        public float[] rotation;
+        public float[] scale;
+        public float[] matrix;
+    }
+
+    [Serializable]
+    internal class GltfMesh
+    {
+        public string name;
+        public GltfPrimitive[] primitives;
+    }
+
+    [Serializable]
+    internal class GltfPrimitive
+    {
+        public GltfAttributes attributes;
+        public int indices = -1;
+        public int material = -1;
+        public int mode = 4;
+    }
+
+    [Serializable]
+    internal class GltfAttributes
+    {
+        public int POSITION = -1;
+        public int NORMAL = -1;
+        public int TANGENT = -1;
+        public int TEXCOORD_0 = -1;
+    }
+
+    [Serializable]
+    internal class GltfMaterial
+    {
+        public string name;
+        public PbrMetallicRoughness pbrMetallicRoughness;
+        public float[] emissiveFactor;
+    }
+
+    [Serializable]
+    internal class PbrMetallicRoughness
+    {
+        public float[] baseColorFactor;
+        public GltfTextureInfo baseColorTexture;
+        public float metallicFactor = 1f;
+        public float roughnessFactor = 1f;
+    }
+
+    [Serializable]
+    internal class GltfTextureInfo
+    {
+        public int index;
+    }
+
+    [Serializable]
+    internal class GltfTexture
+    {
+        public int source = -1;
+    }
+
+    [Serializable]
+    internal class GltfImage
+    {
+        public int bufferView = -1;
+        public string mimeType;
+    }
+
+    [Serializable]
+    internal class GltfBufferView
+    {
+        public int buffer;
+        public int byteOffset;
+        public int byteLength;
+        public int byteStride;
+    }
+
+    [Serializable]
+    internal class GltfAccessor
+    {
+        public int bufferView = -1;
+        public int byteOffset;
+        public int componentType;
+        public int count;
+        public string type;
+        public bool normalized;
     }
 }
