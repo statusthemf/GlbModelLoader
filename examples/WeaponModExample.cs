@@ -17,7 +17,7 @@ using ULTRADROID.Models;
     BepInDependency.DependencyFlags.HardDependency)]
 public sealed class WeaponModExample : BasePlugin
 {
-    internal static ManualLogSource ExampleLog;
+    internal static ManualLogSource ExampleLog { get; private set; }
 
     public override void Load()
     {
@@ -83,13 +83,18 @@ public sealed class StandaloneModelRunner : MonoBehaviour
             Camera camera = Camera.main;
 
             if (camera == null)
+            {
+                WeaponModExample.ExampleLog.LogInfo(
+                    "[GLB Example] Waiting for main camera.");
                 return;
+            }
 
             LoadModels(camera);
         }
         catch (Exception ex)
         {
-            ExampleLog.LogError("[GLB Example] Model loading failed: " + ex);
+            WeaponModExample.ExampleLog.LogError(
+                "[GLB Example] Model loading failed: " + ex);
         }
     }
 
@@ -102,17 +107,18 @@ public sealed class StandaloneModelRunner : MonoBehaviour
 
         if (!File.Exists(knifePath))
         {
-            ExampleLog.LogError("[GLB Example] Knife file not found: " + knifePath);
+            WeaponModExample.ExampleLog.LogError(
+                "[GLB Example] Knife file not found: " + knifePath);
             return;
         }
 
         if (!File.Exists(awpPath))
         {
-            ExampleLog.LogError("[GLB Example] AWP file not found: " + awpPath);
+            WeaponModExample.ExampleLog.LogError(
+                "[GLB Example] AWP file not found: " + awpPath);
             return;
         }
 
-        // Standalone model 1: centered.
         ModelLoadOptions knifeOptions = new ModelLoadOptions
         {
             Name = "ULTRADROID_Example_Knife",
@@ -123,7 +129,6 @@ public sealed class StandaloneModelRunner : MonoBehaviour
             CreateColliders = false
         };
 
-        // Standalone model 2: tiny and to the left.
         ModelLoadOptions awpOptions = new ModelLoadOptions
         {
             Name = "ULTRADROID_Example_AWP",
@@ -134,7 +139,8 @@ public sealed class StandaloneModelRunner : MonoBehaviour
             CreateColliders = false
         };
 
-        ExampleLog.LogInfo("[GLB Example] Loading knife model.");
+        WeaponModExample.ExampleLog.LogInfo(
+            "[GLB Example] Loading knife model.");
 
         knifeModel = ModelAPI.LoadGLB(
             knifePath,
@@ -143,15 +149,18 @@ public sealed class StandaloneModelRunner : MonoBehaviour
 
         if (knifeModel == null)
         {
-            ExampleLog.LogError("[GLB Example] Knife loader returned null.");
+            WeaponModExample.ExampleLog.LogError(
+                "[GLB Example] Knife loader returned null.");
             return;
         }
 
-        ExampleLog.LogInfo("[GLB Example] Knife model loaded.");
+        WeaponModExample.ExampleLog.LogInfo(
+            "[GLB Example] Knife model loaded.");
 
         try
         {
-            ExampleLog.LogInfo("[GLB Example] Loading AWP model.");
+            WeaponModExample.ExampleLog.LogInfo(
+                "[GLB Example] Loading AWP model.");
 
             awpModel = ModelAPI.LoadGLB(
                 awpPath,
@@ -160,13 +169,17 @@ public sealed class StandaloneModelRunner : MonoBehaviour
 
             if (awpModel == null)
             {
-                ExampleLog.LogError("[GLB Example] AWP loader returned null.");
+                WeaponModExample.ExampleLog.LogError(
+                    "[GLB Example] AWP loader returned null.");
+
                 Destroy(knifeModel);
                 knifeModel = null;
                 return;
             }
 
-            ExampleLog.LogInfo("[GLB Example] AWP model loaded.");
+            WeaponModExample.ExampleLog.LogInfo(
+                "[GLB Example] AWP model loaded.");
+
             modelsLoaded = true;
         }
         catch
