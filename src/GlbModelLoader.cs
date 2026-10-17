@@ -17,17 +17,36 @@ namespace ULTRADROID.Models
 
         public bool LoadTextures = true;
         public bool CreateColliders = false;
-
-        // Per-model UV V-flip. Defaults to true so existing callers
-        // keep the previous global behavior.
         public bool FlipUvV = true;
+    }
+
+    // Public animation data exposed to other ULTRADROID plugins.
+    [Serializable]
+    public sealed class GlbAnimationData
+    {
+        public string Name;
+        public float Duration;
+        public GlbAnimationTrack[] Tracks;
+    }
+
+    [Serializable]
+    public sealed class GlbAnimationTrack
+    {
+        public int TargetNode = -1;
+        public string Path;
+        public string Interpolation = "LINEAR";
+
+        public float[] Times;
+        public float[] Values;
+
+        public int ComponentsPerElement;
+        public int ValuesPerKeyframe;
     }
 
     public static class ModelAPI
     {
         public const string Version = "0.1.16-per-model-uvflip";
 
-        // Single shared log source for the whole API.
         internal static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
                 "ULTRADROID Models API");
@@ -36,6 +55,31 @@ namespace ULTRADROID.Models
         {
             DiagnosticLog.LogError(
                 "[ULTRADROID Models] " + message + "\n" + ex);
+        }
+
+        // Reads animation data without creating a Unity model.
+        public static GlbAnimationData[] ReadGLBAnimations(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentException(
+                    "A GLB path is required.", "path");
+
+            if (!File.Exists(path))
+                throw new FileNotFoundException(
+                    "GLB file was not found.", path);
+
+            try
+            {
+                GlbDocument doc =
+                    GlbDocument.Parse(File.ReadAllBytes(path));
+
+                return doc.ReadAnimations();
+            }
+            catch (Exception ex)
+            {
+                LogError("Failed to read GLB animations.", ex);
+                throw;
+            }
         }
 
         public static GameObject LoadGLB(
@@ -54,7 +98,6 @@ namespace ULTRADROID.Models
             options = options ?? new ModelLoadOptions();
 
             byte[] fileBytes = File.ReadAllBytes(path);
-
             GlbDocument doc;
 
             try
@@ -198,8 +241,6 @@ namespace ULTRADROID.Models
             int count = Count(doc.json.materials);
             Material[] result = new Material[count + 1];
 
-            // Converted metallic-gloss textures, shared between materials
-            // that use the same image and the same factors.
             Dictionary<string, Texture2D> convertedCache =
                 new Dictionary<string, Texture2D>();
 
@@ -264,42 +305,23 @@ namespace ULTRADROID.Models
                             Texture2D texture = textures[imageIndex];
 
                             if (material.HasProperty("_MainTex"))
-                            {
-                                material.SetTexture(
-                                    "_MainTex", texture);
-                            }
+                                material.SetTexture("_MainTex", texture);
 
                             if (material.HasProperty("_BaseMap"))
-                            {
-                                material.SetTexture(
-                                    "_BaseMap", texture);
-                            }
+                                material.SetTexture("_BaseMap", texture);
                         }
                     }
 
-                    // Scalar fallback (used as-is when there is no
-                    // metallic-roughness texture). If a texture is
-                    // converted below, these are reset so the factors
-                    // are not applied twice.
                     float scalarSmoothness = 1f - roughnessFactor;
 
                     if (material.HasProperty("_Metallic"))
-                    {
-                        material.SetFloat(
-                            "_Metallic", metallicFactor);
-                    }
+                        material.SetFloat("_Metallic", metallicFactor);
 
                     if (material.HasProperty("_Glossiness"))
-                    {
-                        material.SetFloat(
-                            "_Glossiness", scalarSmoothness);
-                    }
+                        material.SetFloat("_Glossiness", scalarSmoothness);
 
                     if (material.HasProperty("_Smoothness"))
-                    {
-                        material.SetFloat(
-                            "_Smoothness", scalarSmoothness);
-                    }
+                        material.SetFloat("_Smoothness", scalarSmoothness);
 
                     if (pbr.metallicRoughnessTexture != null)
                     {
@@ -346,21 +368,14 @@ namespace ULTRADROID.Models
                                     material.SetTexture(
                                         "_MetallicGlossMap", converted);
 
-                                    // Factors are already baked into the
-                                    // converted texture, so the shader
-                                    // multipliers must be 1.
                                     material.SetFloat("_Metallic", 1f);
-                                    material.SetFloat(
-                                        "_GlossMapScale", 1f);
+                                    material.SetFloat("_GlossMapScale", 1f);
 
-                                    // Smoothness comes from the alpha
-                                    // channel of the metallic map.
                                     if (material.HasProperty(
                                         "_SmoothnessTextureChannel"))
                                     {
                                         material.SetFloat(
-                                            "_SmoothnessTextureChannel",
-                                            0f);
+                                            "_SmoothnessTextureChannel", 0f);
                                     }
 
                                     material.EnableKeyword(
@@ -389,12 +404,6 @@ namespace ULTRADROID.Models
             return result;
         }
 
-        // Converts a glTF metallic-roughness texture
-        //   G = roughness, B = metallic
-        // into Unity Standard _MetallicGlossMap layout
-        //   R = metallic, A = smoothness (1 - roughness)
-        // metallicFactor and roughnessFactor are baked in here.
-        // Returns null (and logs) if the source cannot be read.
         private static Texture2D BuildUnityMetallicGlossTexture(
             Texture2D source,
             float metallicFactor,
@@ -425,8 +434,7 @@ namespace ULTRADROID.Models
                 if (sourcePixels == null || sourcePixels.Length == 0)
                 {
                     LogError(
-                        "Metallic-roughness convert: no pixels read " +
-                        "(texture may not be readable).", null);
+                        "Metallic-roughness convert: no pixels read.", null);
                     return null;
                 }
 
@@ -455,7 +463,6 @@ namespace ULTRADROID.Models
                         metallicByte, 0, 0, smoothnessByte);
                 }
 
-                // linear = true: this is data, not color.
                 Texture2D converted = new Texture2D(
                     width,
                     height,
@@ -491,8 +498,7 @@ namespace ULTRADROID.Models
                 textureIndex >= doc.json.textures.Length)
                 return -1;
 
-            GltfTexture texture =
-                doc.json.textures[textureIndex];
+            GltfTexture texture = doc.json.textures[textureIndex];
 
             if (texture == null)
                 return -1;
@@ -518,12 +524,9 @@ namespace ULTRADROID.Models
             {
                 if (sceneIndex < 0 ||
                     sceneIndex >= doc.json.scenes.Length)
-                {
                     sceneIndex = 0;
-                }
 
-                GltfScene scene =
-                    doc.json.scenes[sceneIndex];
+                GltfScene scene = doc.json.scenes[sceneIndex];
 
                 if (scene != null)
                     roots = scene.nodes;
@@ -531,25 +534,20 @@ namespace ULTRADROID.Models
 
             if (roots == null || roots.Length == 0)
             {
-                HashSet<int> childIndices =
-                    new HashSet<int>();
+                HashSet<int> childIndices = new HashSet<int>();
 
                 foreach (GltfNode node in doc.json.nodes)
                 {
-                    if (node == null ||
-                        node.children == null)
+                    if (node == null || node.children == null)
                         continue;
 
                     foreach (int child in node.children)
                         childIndices.Add(child);
                 }
 
-                List<int> inferredRoots =
-                    new List<int>();
+                List<int> inferredRoots = new List<int>();
 
-                for (int i = 0;
-                    i < doc.json.nodes.Length;
-                    i++)
+                for (int i = 0; i < doc.json.nodes.Length; i++)
                 {
                     if (!childIndices.Contains(i))
                         inferredRoots.Add(i);
@@ -558,8 +556,7 @@ namespace ULTRADROID.Models
                 roots = inferredRoots.ToArray();
             }
 
-            HashSet<int> recursionGuard =
-                new HashSet<int>();
+            HashSet<int> recursionGuard = new HashSet<int>();
 
             foreach (int nodeIndex in roots)
             {
@@ -640,8 +637,7 @@ namespace ULTRADROID.Models
             Transform transform,
             GltfNode node)
         {
-            if (node.matrix != null &&
-                node.matrix.Length == 16)
+            if (node.matrix != null && node.matrix.Length == 16)
             {
                 Matrix4x4 matrix = new Matrix4x4();
 
@@ -670,8 +666,7 @@ namespace ULTRADROID.Models
                     node.translation[2]);
             }
 
-            if (node.rotation != null &&
-                node.rotation.Length >= 4)
+            if (node.rotation != null && node.rotation.Length >= 4)
             {
                 transform.localRotation = new Quaternion(
                     node.rotation[0],
@@ -680,8 +675,7 @@ namespace ULTRADROID.Models
                     node.rotation[3]);
             }
 
-            if (node.scale != null &&
-                node.scale.Length >= 3)
+            if (node.scale != null && node.scale.Length >= 3)
             {
                 transform.localScale = new Vector3(
                     node.scale[0],
@@ -705,11 +699,8 @@ namespace ULTRADROID.Models
             List<Vector3> normals = new List<Vector3>();
             List<Vector2> uv = new List<Vector2>();
 
-            List<List<int>> submeshTriangles =
-                new List<List<int>>();
-
-            List<Material> submeshMaterials =
-                new List<Material>();
+            List<List<int>> submeshTriangles = new List<List<int>>();
+            List<Material> submeshMaterials = new List<Material>();
 
             bool hasNormals = true;
             bool hasUv = true;
@@ -728,26 +719,19 @@ namespace ULTRADROID.Models
                 }
 
                 Vector3[] primitiveVertices =
-                    doc.ReadVector3(
-                        primitive.attributes.POSITION);
+                    doc.ReadVector3(primitive.attributes.POSITION);
 
                 Vector3[] primitiveNormals = null;
 
                 if (primitive.attributes.NORMAL >= 0)
-                {
                     primitiveNormals =
-                        doc.ReadVector3(
-                            primitive.attributes.NORMAL);
-                }
+                        doc.ReadVector3(primitive.attributes.NORMAL);
 
                 Vector2[] primitiveUv = null;
 
                 if (primitive.attributes.TEXCOORD_0 >= 0)
-                {
                     primitiveUv =
-                        doc.ReadVector2(
-                            primitive.attributes.TEXCOORD_0);
-                }
+                        doc.ReadVector2(primitive.attributes.TEXCOORD_0);
 
                 int vertexOffset = vertices.Count;
                 vertices.AddRange(primitiveVertices);
@@ -784,12 +768,9 @@ namespace ULTRADROID.Models
                     int b = indices[i + 1];
                     int c = indices[i + 2];
 
-                    if (a < 0 ||
-                        a >= primitiveVertices.Length ||
-                        b < 0 ||
-                        b >= primitiveVertices.Length ||
-                        c < 0 ||
-                        c >= primitiveVertices.Length)
+                    if (a < 0 || a >= primitiveVertices.Length ||
+                        b < 0 || b >= primitiveVertices.Length ||
+                        c < 0 || c >= primitiveVertices.Length)
                     {
                         throw new InvalidDataException(
                             "Mesh index exceeds vertex count.");
@@ -821,10 +802,8 @@ namespace ULTRADROID.Models
                 : source.name;
 
             if (vertices.Count > 65535)
-            {
                 mesh.indexFormat =
                     UnityEngine.Rendering.IndexFormat.UInt32;
-            }
 
             Il2CppSystem.Collections.Generic.List<Vector3>
                 il2CppVertices =
@@ -849,7 +828,7 @@ namespace ULTRADROID.Models
             {
                 Il2CppSystem.Collections.Generic.List<Vector3>
                     il2CppNormals =
-                        new Il2CppSystem.Collections.Generic.List<Vector3>();
+                    new Il2CppSystem.Collections.Generic.List<Vector3>();
 
                 foreach (Vector3 normal in normals)
                     il2CppNormals.Add(normal);
@@ -865,7 +844,7 @@ namespace ULTRADROID.Models
             {
                 Il2CppSystem.Collections.Generic.List<Vector4>
                     il2CppUv =
-                        new Il2CppSystem.Collections.Generic.List<Vector4>();
+                    new Il2CppSystem.Collections.Generic.List<Vector4>();
 
                 bool flipV = options.FlipUvV;
 
@@ -944,7 +923,6 @@ namespace ULTRADROID.Models
 
             byte[] jsonBytes = null;
             byte[] binBytes = null;
-
             int position = 12;
 
             while (position + 8 <= file.Length)
@@ -955,10 +933,8 @@ namespace ULTRADROID.Models
                 position += 8;
 
                 if (chunkLength > file.Length - position)
-                {
                     throw new InvalidDataException(
                         "GLB chunk exceeds file length.");
-                }
 
                 if (chunkType == 0x4E4F534A)
                 {
@@ -1007,10 +983,8 @@ namespace ULTRADROID.Models
                 binBytes = new byte[0];
 
             if (root.asset == null || root.asset.version != "2.0")
-            {
                 throw new InvalidDataException(
                     "Missing or unsupported glTF asset version.");
-            }
 
             return new GlbDocument
             {
@@ -1029,6 +1003,188 @@ namespace ULTRADROID.Models
                 binary, view.byteOffset, result, 0, view.byteLength);
 
             return result;
+        }
+
+        // Reads animation metadata and actual binary keyframe values.
+        internal GlbAnimationData[] ReadAnimations()
+        {
+            if (json.animations == null ||
+                json.animations.Length == 0)
+                return new GlbAnimationData[0];
+
+            List<GlbAnimationData> result =
+                new List<GlbAnimationData>();
+
+            foreach (GltfAnimation animation in json.animations)
+            {
+                if (animation == null)
+                    continue;
+
+                if (animation.channels == null ||
+                    animation.samplers == null)
+                {
+                    throw new InvalidDataException(
+                        "Animation is missing channels or samplers.");
+                }
+
+                List<GlbAnimationTrack> tracks =
+                    new List<GlbAnimationTrack>();
+
+                float duration = 0f;
+
+                foreach (GltfAnimationChannel channel in animation.channels)
+                {
+                    if (channel == null || channel.target == null)
+                        throw new InvalidDataException(
+                            "Animation channel or target is null.");
+
+                    if (channel.sampler < 0 ||
+                        channel.sampler >= animation.samplers.Length)
+                    {
+                        throw new InvalidDataException(
+                            "Animation sampler index is invalid.");
+                    }
+
+                    GltfAnimationSampler sampler =
+                        animation.samplers[channel.sampler];
+
+                    if (sampler == null)
+                        throw new InvalidDataException(
+                            "Animation sampler is null.");
+
+                    string path = channel.target.path;
+
+                    if (path != "translation" &&
+                        path != "rotation" &&
+                        path != "scale" &&
+                        path != "weights")
+                    {
+                        throw new InvalidDataException(
+                            "Unsupported animation path: " + path);
+                    }
+
+                    // Input: timestamps in seconds.
+                    GltfAccessor inputAccessor =
+                        GetAccessor(sampler.input);
+
+                    if (inputAccessor.componentType != 5126 ||
+                        inputAccessor.type != "SCALAR")
+                    {
+                        throw new InvalidDataException(
+                            "Animation timestamps must use FLOAT SCALAR.");
+                    }
+
+                    float[] times = ReadFloats(sampler.input, 1);
+
+                    if (times.Length == 0)
+                        throw new InvalidDataException(
+                            "Animation has no timestamps.");
+
+                    for (int i = 0; i < times.Length; i++)
+                    {
+                        if (float.IsNaN(times[i]) ||
+                            float.IsInfinity(times[i]) ||
+                            times[i] < 0f)
+                        {
+                            throw new InvalidDataException(
+                                "Animation contains an invalid timestamp.");
+                        }
+
+                        if (i > 0 && times[i] < times[i - 1])
+                        {
+                            throw new InvalidDataException(
+                                "Animation timestamps are not ordered.");
+                        }
+
+                        if (times[i] > duration)
+                            duration = times[i];
+                    }
+
+                    // Output: actual keyframe values.
+                    GltfAccessor outputAccessor =
+                        GetAccessor(sampler.output);
+
+                    if (outputAccessor.componentType != 5126)
+                        throw new InvalidDataException(
+                            "Animation output must use FLOAT values.");
+
+                    int components =
+                        ComponentCount(outputAccessor.type);
+
+                    float[] values =
+                        ReadFloats(sampler.output, components);
+
+                    string interpolation =
+                        string.IsNullOrEmpty(sampler.interpolation)
+                            ? "LINEAR"
+                            : sampler.interpolation;
+
+                    if (interpolation != "LINEAR" &&
+                        interpolation != "STEP" &&
+                        interpolation != "CUBICSPLINE")
+                    {
+                        throw new InvalidDataException(
+                            "Unsupported interpolation: " + interpolation);
+                    }
+
+                    int multiplier =
+                        interpolation == "CUBICSPLINE" ? 3 : 1;
+
+                    int expectedElements =
+                        checked(times.Length * multiplier);
+
+                    if (outputAccessor.count % expectedElements != 0)
+                    {
+                        throw new InvalidDataException(
+                            "Animation output count does not match timestamps.");
+                    }
+
+                    int valuesPerKeyframe =
+                        outputAccessor.count /
+                        expectedElements * components;
+
+                    if (path == "translation" || path == "scale")
+                    {
+                        if (components != 3 ||
+                            valuesPerKeyframe != 3)
+                        {
+                            throw new InvalidDataException(
+                                path + " animation must use VEC3 values.");
+                        }
+                    }
+                    else if (path == "rotation")
+                    {
+                        if (components != 4 ||
+                            valuesPerKeyframe != 4)
+                        {
+                            throw new InvalidDataException(
+                                "Rotation animation must use VEC4 values.");
+                        }
+                    }
+
+                    tracks.Add(new GlbAnimationTrack
+                    {
+                        TargetNode = channel.target.node,
+                        Path = path,
+                        Interpolation = interpolation,
+                        Times = times,
+                        Values = values,
+                        ComponentsPerElement = components,
+                        ValuesPerKeyframe = valuesPerKeyframe
+                    });
+                }
+
+                result.Add(new GlbAnimationData
+                {
+                    Name = string.IsNullOrEmpty(animation.name)
+                        ? "Animation_" + result.Count
+                        : animation.name,
+                    Duration = duration,
+                    Tracks = tracks.ToArray()
+                });
+            }
+
+            return result.ToArray();
         }
 
         internal Vector3[] ReadVector3(int accessorIndex)
@@ -1067,31 +1223,27 @@ namespace ULTRADROID.Models
             GltfAccessor accessor = GetAccessor(accessorIndex);
 
             if (accessor.componentType != 5126)
-            {
                 throw new InvalidDataException(
-                    "Expected FLOAT accessor for vector attributes.");
-            }
+                    "Expected FLOAT accessor.");
 
             if (ComponentCount(accessor.type) != components)
-            {
                 throw new InvalidDataException(
-                    "Unexpected accessor type for vector attribute.");
-            }
+                    "Unexpected accessor type.");
 
             GltfBufferView view = GetView(accessor.bufferView);
 
             int elementSize = components * 4;
+
             int stride = view.byteStride > 0
                 ? view.byteStride
                 : elementSize;
 
             if (stride < elementSize)
-            {
                 throw new InvalidDataException(
                     "Accessor byte stride is too small.");
-            }
 
-            int start = checked(view.byteOffset + accessor.byteOffset);
+            int start = checked(
+                view.byteOffset + accessor.byteOffset);
 
             float[] result =
                 new float[checked(accessor.count * components)];
@@ -1103,10 +1255,11 @@ namespace ULTRADROID.Models
                     int offset = checked(
                         start + i * stride + c * 4);
 
-                    if (offset < 0 || offset + 4 > binary.Length)
+                    if (offset < 0 ||
+                        offset + 4 > binary.Length)
                     {
                         throw new InvalidDataException(
-                            "Vertex accessor exceeds binary data.");
+                            "Accessor exceeds binary data.");
                     }
 
                     result[i * components + c] =
@@ -1122,16 +1275,12 @@ namespace ULTRADROID.Models
             GltfAccessor accessor = GetAccessor(accessorIndex);
 
             if (accessor.type != "SCALAR")
-            {
                 throw new InvalidDataException(
                     "Index accessor must be SCALAR.");
-            }
 
             if (accessor.componentType == 5126)
-            {
                 throw new InvalidDataException(
                     "Index accessor cannot use FLOAT.");
-            }
 
             GltfBufferView view = GetView(accessor.bufferView);
 
@@ -1141,29 +1290,28 @@ namespace ULTRADROID.Models
                 accessor.componentType == 5125 ? 4 : 0;
 
             if (elementSize == 0)
-            {
                 throw new InvalidDataException(
                     "Unsupported index component type.");
-            }
 
             int stride = view.byteStride > 0
                 ? view.byteStride
                 : elementSize;
 
             if (stride < elementSize)
-            {
                 throw new InvalidDataException(
                     "Index byte stride is too small.");
-            }
 
-            int start = checked(view.byteOffset + accessor.byteOffset);
+            int start = checked(
+                view.byteOffset + accessor.byteOffset);
+
             int[] result = new int[accessor.count];
 
             for (int i = 0; i < accessor.count; i++)
             {
                 int offset = checked(start + i * stride);
 
-                if (offset < 0 || offset + elementSize > binary.Length)
+                if (offset < 0 ||
+                    offset + elementSize > binary.Length)
                 {
                     throw new InvalidDataException(
                         "Index accessor exceeds binary data.");
@@ -1175,17 +1323,17 @@ namespace ULTRADROID.Models
                 }
                 else if (elementSize == 2)
                 {
-                    result[i] = BitConverter.ToUInt16(binary, offset);
+                    result[i] =
+                        BitConverter.ToUInt16(binary, offset);
                 }
                 else
                 {
-                    uint value = BitConverter.ToUInt32(binary, offset);
+                    uint value =
+                        BitConverter.ToUInt32(binary, offset);
 
                     if (value > int.MaxValue)
-                    {
                         throw new InvalidDataException(
                             "Index is too large.");
-                    }
 
                     result[i] = (int)value;
                 }
@@ -1210,7 +1358,8 @@ namespace ULTRADROID.Models
                 throw new InvalidDataException(
                     "Accessor entry is null.");
 
-            if (accessor.count < 0 || accessor.byteOffset < 0)
+            if (accessor.count < 0 ||
+                accessor.byteOffset < 0)
             {
                 throw new InvalidDataException(
                     "Accessor has a negative count or offset.");
@@ -1245,10 +1394,8 @@ namespace ULTRADROID.Models
             }
 
             if (view.buffer != 0)
-            {
                 throw new InvalidDataException(
                     "Only the embedded GLB binary buffer is supported.");
-            }
 
             return view;
         }
@@ -1283,6 +1430,39 @@ namespace ULTRADROID.Models
         public GltfImage[] images;
         public GltfBufferView[] bufferViews;
         public GltfAccessor[] accessors;
+
+        // Animation metadata parsed by GlbManualJsonParser.
+        public GltfAnimation[] animations;
+    }
+
+    [Serializable]
+    internal class GltfAnimation
+    {
+        public string name;
+        public GltfAnimationSampler[] samplers;
+        public GltfAnimationChannel[] channels;
+    }
+
+    [Serializable]
+    internal class GltfAnimationSampler
+    {
+        public int input = -1;
+        public int output = -1;
+        public string interpolation = "LINEAR";
+    }
+
+    [Serializable]
+    internal class GltfAnimationChannel
+    {
+        public int sampler = -1;
+        public GltfAnimationTarget target;
+    }
+
+    [Serializable]
+    internal class GltfAnimationTarget
+    {
+        public int node = -1;
+        public string path;
     }
 
     [Serializable]
