@@ -315,9 +315,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             var options = new ModelLoadOptions
             {
                 Name = "ULTRADROID_BladesOfChaos",
-                Position = new Vector3(0.05f, -0.65f, 1.0f),
+                Position = new Vector3(0f, 0f, 1.0f),
                 RotationEuler = Vector3.zero,
-                Scale = new Vector3(0.03f, 0.03f, 0.03f),
+                Scale = new Vector3(0.1f, 0.1f, 0.1f),
 
                 LoadTextures = true,
                 CreateColliders = false,
