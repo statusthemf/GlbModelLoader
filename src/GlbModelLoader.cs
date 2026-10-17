@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -21,7 +20,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.7-uv-flip-test";
+        public const string Version = "0.1.8-metallic-roughness";
 
         private static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
@@ -253,6 +252,11 @@ namespace ULTRADROID.Models
             int count = Count(doc.json.materials);
             Material[] result = new Material[count + 1];
 
+            // Converted metallic-gloss textures, shared between materials
+            // that use the same image and the same factors.
+            Dictionary<string, Texture2D> convertedCache =
+                new Dictionary<string, Texture2D>();
+
             Log("[MATERIAL DIAG] Starting. Materials=" + count +
                 ", loadedTextures=" + CountLoadedTextures(textures));
 
@@ -291,6 +295,12 @@ namespace ULTRADROID.Models
 
                 if (pbr != null)
                 {
+                    float metallicFactor =
+                        Mathf.Clamp01(pbr.metallicFactor);
+
+                    float roughnessFactor =
+                        Mathf.Clamp01(pbr.roughnessFactor);
+
                     if (pbr.baseColorFactor != null &&
                         pbr.baseColorFactor.Length >= 4)
                     {
@@ -351,21 +361,160 @@ namespace ULTRADROID.Models
                             ": no baseColorTexture defined.");
                     }
 
+                    // Scalar fallback (used as-is when there is no
+                    // metallic-roughness texture). If a texture is
+                    // converted below, these are reset so the factors
+                    // are not applied twice.
+                    float scalarSmoothness = 1f - roughnessFactor;
+
                     if (material.HasProperty("_Metallic"))
                     {
                         material.SetFloat(
-                            "_Metallic", pbr.metallicFactor);
+                            "_Metallic", metallicFactor);
                     }
 
-                    // TEMPORARY DIAGNOSTIC TEST:
-                    // Force smoothness to 0.6 to test whether
-                    // smoother reflections improve the gold.
-                    // Restore the glTF roughness calculation
-                    // after this diagnostic test.
                     if (material.HasProperty("_Glossiness"))
                     {
-                        material.SetFloat("_Glossiness", 0.6f);
+                        material.SetFloat(
+                            "_Glossiness", scalarSmoothness);
                     }
+
+                    if (material.HasProperty("_Smoothness"))
+                    {
+                        material.SetFloat(
+                            "_Smoothness", scalarSmoothness);
+                    }
+
+                    bool metallicTextureAssigned = false;
+
+                    if (pbr.metallicRoughnessTexture != null)
+                    {
+                        int mrTextureIndex =
+                            pbr.metallicRoughnessTexture.index;
+
+                        int mrImageIndex =
+                            GetImageIndex(doc, mrTextureIndex);
+
+                        bool found =
+                            mrImageIndex >= 0 &&
+                            mrImageIndex < textures.Length &&
+                            textures[mrImageIndex] != null;
+
+                        Log("[METALLIC-ROUGHNESS] Material " + i +
+                            ": textureIndex=" + mrTextureIndex +
+                            ", imageIndex=" + mrImageIndex +
+                            ", found=" + found);
+
+                        // Only the Standard shader workflow is
+                        // implemented. URP Lit also has _MetallicGlossMap
+                        // but a different smoothness setup that has not
+                        // been verified here, so it is not touched.
+                        bool standardWorkflow =
+                            material.HasProperty("_MetallicGlossMap") &&
+                            material.HasProperty("_GlossMapScale");
+
+                        if (!found)
+                        {
+                            Log("[METALLIC-ROUGHNESS] Material " + i +
+                                ": texture not available; using " +
+                                "scalar metallic/smoothness.");
+                        }
+                        else if (!standardWorkflow)
+                        {
+                            Log("[METALLIC-ROUGHNESS] Material " + i +
+                                ": shader " + material.shader.name +
+                                " does not use the Standard " +
+                                "_MetallicGlossMap/_GlossMapScale " +
+                                "layout; texture NOT assigned. " +
+                                "Using scalar metallic/smoothness.");
+                        }
+                        else
+                        {
+                            string cacheKey =
+                                mrImageIndex + "|" +
+                                metallicFactor.ToString("R") + "|" +
+                                roughnessFactor.ToString("R");
+
+                            Texture2D converted;
+
+                            if (!convertedCache.TryGetValue(
+                                cacheKey, out converted))
+                            {
+                                converted =
+                                    BuildUnityMetallicGlossTexture(
+                                        textures[mrImageIndex],
+                                        metallicFactor,
+                                        roughnessFactor);
+
+                                convertedCache[cacheKey] = converted;
+                            }
+
+                            bool convertedOk = converted != null;
+
+                            Log("[METALLIC-ROUGHNESS] Material " + i +
+                                ": converted=" + convertedOk);
+
+                            if (convertedOk)
+                            {
+                                try
+                                {
+                                    material.SetTexture(
+                                        "_MetallicGlossMap", converted);
+
+                                    // Factors are already baked into the
+                                    // converted texture, so the shader
+                                    // multipliers must be 1.
+                                    material.SetFloat("_Metallic", 1f);
+                                    material.SetFloat(
+                                        "_GlossMapScale", 1f);
+
+                                    // Smoothness comes from the alpha
+                                    // channel of the metallic map.
+                                    if (material.HasProperty(
+                                        "_SmoothnessTextureChannel"))
+                                    {
+                                        material.SetFloat(
+                                            "_SmoothnessTextureChannel",
+                                            0f);
+                                    }
+
+                                    material.EnableKeyword(
+                                        "_METALLICGLOSSMAP");
+
+                                    metallicTextureAssigned = true;
+
+                                    Log("[METALLIC-ROUGHNESS] Material " +
+                                        i + ": assigned=true, texture=" +
+                                        converted.name);
+                                }
+                                catch (Exception ex)
+                                {
+                                    LogError(
+                                        "[METALLIC-ROUGHNESS] Material " +
+                                        i + ": assignment failed.", ex);
+                                }
+                            }
+                            else
+                            {
+                                Log("[METALLIC-ROUGHNESS] Material " + i +
+                                    ": assigned=false; using scalar " +
+                                    "metallic/smoothness.");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Log("[METALLIC-ROUGHNESS] Material " + i +
+                            ": no metallicRoughnessTexture defined; " +
+                            "metallic=" + metallicFactor +
+                            ", smoothness=" + scalarSmoothness);
+                    }
+
+                    Log("[MATERIAL DIAG] Material " + i +
+                        ": metallicFactor=" + metallicFactor +
+                        ", roughnessFactor=" + roughnessFactor +
+                        ", metallicTextureAssigned=" +
+                        metallicTextureAssigned);
                 }
                 else
                 {
@@ -402,6 +551,102 @@ namespace ULTRADROID.Models
             Log("[MATERIAL DIAG] Created fallback material.");
 
             return result;
+        }
+
+        // Converts a glTF metallic-roughness texture
+        //   G = roughness, B = metallic
+        // into Unity Standard _MetallicGlossMap layout
+        //   R = metallic, A = smoothness (1 - roughness)
+        // metallicFactor and roughnessFactor are baked in here.
+        // Returns null (and logs) if the source cannot be read.
+        private static Texture2D BuildUnityMetallicGlossTexture(
+            Texture2D source,
+            float metallicFactor,
+            float roughnessFactor)
+        {
+            if (source == null)
+            {
+                Log("[METALLIC-ROUGHNESS] Convert: source is null.");
+                return null;
+            }
+
+            try
+            {
+                int width = source.width;
+                int height = source.height;
+
+                if (width <= 0 || height <= 0)
+                {
+                    Log("[METALLIC-ROUGHNESS] Convert: invalid size " +
+                        width + "x" + height);
+                    return null;
+                }
+
+                Color32[] sourcePixels = source.GetPixels32();
+
+                if (sourcePixels == null || sourcePixels.Length == 0)
+                {
+                    Log("[METALLIC-ROUGHNESS] Convert: no pixels read " +
+                        "(texture may not be readable).");
+                    return null;
+                }
+
+                Color32[] convertedPixels =
+                    new Color32[sourcePixels.Length];
+
+                for (int i = 0; i < sourcePixels.Length; i++)
+                {
+                    Color32 pixel = sourcePixels[i];
+
+                    float metallic =
+                        (pixel.b / 255f) * metallicFactor;
+
+                    float roughness =
+                        (pixel.g / 255f) * roughnessFactor;
+
+                    float smoothness = 1f - roughness;
+
+                    byte metallicByte = (byte)Mathf.Clamp(
+                        Mathf.RoundToInt(metallic * 255f), 0, 255);
+
+                    byte smoothnessByte = (byte)Mathf.Clamp(
+                        Mathf.RoundToInt(smoothness * 255f), 0, 255);
+
+                    convertedPixels[i] = new Color32(
+                        metallicByte,
+                        0,
+                        0,
+                        smoothnessByte);
+                }
+
+                // linear = true: this is data, not color.
+                Texture2D converted = new Texture2D(
+                    width,
+                    height,
+                    TextureFormat.RGBA32,
+                    true,
+                    true);
+
+                converted.name = source.name + "_UnityMetallicGloss";
+                converted.wrapMode = source.wrapMode;
+                converted.filterMode = source.filterMode;
+
+                converted.SetPixels32(convertedPixels);
+                converted.Apply(true, false);
+
+                Log("[METALLIC-ROUGHNESS] Convert OK: " +
+                    converted.name + " " + width + "x" + height);
+
+                return converted;
+            }
+            catch (Exception ex)
+            {
+                LogError(
+                    "[METALLIC-ROUGHNESS] Texture conversion failed " +
+                    "for " + source.name, ex);
+
+                return null;
+            }
         }
 
         private static int CountLoadedTextures(Texture2D[] textures)
@@ -1429,6 +1674,7 @@ namespace ULTRADROID.Models
     {
         public float[] baseColorFactor;
         public GltfTextureInfo baseColorTexture;
+        public GltfTextureInfo metallicRoughnessTexture;
         public float metallicFactor = 1f;
         public float roughnessFactor = 1f;
     }
