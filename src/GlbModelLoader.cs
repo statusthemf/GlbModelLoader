@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using Newtonsoft.Json;
 using UnityEngine;
 
 namespace ULTRADROID.Models
@@ -745,9 +746,20 @@ namespace ULTRADROID.Models
             Debug.Log("[ULTRADROID Models] JSON extracted; chars=" +
                 jsonText.Length);
 
-            Debug.Log("[ULTRADROID Models] Deserializing glTF JSON.");
+            Debug.Log("[ULTRADROID Models] Deserializing glTF JSON with Newtonsoft.Json.");
 
-            GltfRoot root = JsonUtility.FromJson<GltfRoot>(jsonText);
+            GltfRoot root;
+
+            try
+            {
+                root = JsonConvert.DeserializeObject<GltfRoot>(jsonText);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    "[ULTRADROID Models] Newtonsoft JSON parsing failed: " + ex);
+                throw;
+            }
 
             if (root == null)
                 throw new InvalidDataException(
