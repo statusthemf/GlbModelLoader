@@ -20,7 +20,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.5-uv-diagnostics";
+        public const string Version = "0.1.6-emission-test";
 
         private static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
@@ -381,19 +381,22 @@ namespace ULTRADROID.Models
                         ": PBR data is missing.");
                 }
 
-                if (source.emissiveFactor != null &&
-                    source.emissiveFactor.Length >= 3 &&
-                    material.HasProperty("_EmissionColor"))
+                // TEMPORARY DIAGNOSTIC:
+                // Disable emission so we can test whether it is
+                // washing out the base-color texture.
+                // Do not modify the GLB's UVs or texture assignment.
+                if (material.HasProperty("_EmissionColor"))
                 {
-                    Color emission = new Color(
-                        source.emissiveFactor[0],
-                        source.emissiveFactor[1],
-                        source.emissiveFactor[2]);
-
-                    material.EnableKeyword("_EMISSION");
-
                     material.SetColor(
-                        "_EmissionColor", emission);
+                        "_EmissionColor", Color.black);
+
+                    material.DisableKeyword("_EMISSION");
+
+                    Log("[EMISSION TEST] Material " + i +
+                        ": emission disabled; source emissiveFactor=" +
+                        (source.emissiveFactor == null
+                            ? "<null>"
+                            : string.Join(",", source.emissiveFactor)));
                 }
 
                 result[i] = material;
@@ -750,8 +753,6 @@ namespace ULTRADROID.Models
                         : primitiveUv.Length) +
                     ", materialIndex=" + primitive.material);
 
-                // UV diagnostics: report the actual coordinate range.
-                // Coordinates outside 0..1 are not automatically invalid.
                 if (primitiveUv != null &&
                     primitiveUv.Length > 0)
                 {
@@ -961,9 +962,6 @@ namespace ULTRADROID.Models
                 ", submeshes=" + mesh.subMeshCount +
                 ", materialSlots=" + submeshMaterials.Count);
 
-            // Diagnostic only:
-            // Inspect the selected materials and textures without
-            // replacing them or changing the model's appearance.
             for (int i = 0; i < submeshMaterials.Count; i++)
             {
                 Material material = submeshMaterials[i];
