@@ -14,16 +14,18 @@ namespace ULTRADROID.Models
         public Vector3 Position = Vector3.zero;
         public Vector3 RotationEuler = Vector3.zero;
         public Vector3 Scale = Vector3.one;
+
         public bool LoadTextures = true;
         public bool CreateColliders = false;
+
+        // Per-model UV V-flip. Defaults to true so existing callers
+        // keep the previous global behavior.
+        public bool FlipUvV = true;
     }
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.15-clean";
-
-        // UV TEST SWITCH: true = flip V (1 - v), false = use V as-is.
-        private const bool FlipUvV = true;
+        public const string Version = "0.1.16-per-model-uvflip";
 
         // Single shared log source for the whole API.
         internal static readonly ManualLogSource DiagnosticLog =
@@ -94,7 +96,7 @@ namespace ULTRADROID.Models
                     doc,
                     root.transform,
                     materials,
-                    options.CreateColliders);
+                    options);
 
                 return root;
             }
@@ -502,7 +504,7 @@ namespace ULTRADROID.Models
             GlbDocument doc,
             Transform root,
             Material[] materials,
-            bool colliders)
+            ModelLoadOptions options)
         {
             if (doc.json.nodes == null ||
                 doc.json.nodes.Length == 0)
@@ -566,7 +568,7 @@ namespace ULTRADROID.Models
                     nodeIndex,
                     root,
                     materials,
-                    colliders,
+                    options,
                     recursionGuard);
             }
         }
@@ -576,7 +578,7 @@ namespace ULTRADROID.Models
             int index,
             Transform parent,
             Material[] materials,
-            bool colliders,
+            ModelLoadOptions options,
             HashSet<int> guard)
         {
             if (index < 0 ||
@@ -613,7 +615,7 @@ namespace ULTRADROID.Models
                         mesh,
                         gameObject,
                         materials,
-                        colliders);
+                        options);
                 }
             }
 
@@ -626,7 +628,7 @@ namespace ULTRADROID.Models
                         child,
                         gameObject.transform,
                         materials,
-                        colliders,
+                        options,
                         guard);
                 }
             }
@@ -693,7 +695,7 @@ namespace ULTRADROID.Models
             GltfMesh source,
             GameObject gameObject,
             Material[] materials,
-            bool colliders)
+            ModelLoadOptions options)
         {
             if (source.primitives == null ||
                 source.primitives.Length == 0)
@@ -865,12 +867,13 @@ namespace ULTRADROID.Models
                     il2CppUv =
                         new Il2CppSystem.Collections.Generic.List<Vector4>();
 
+                bool flipV = options.FlipUvV;
+
                 foreach (Vector2 coordinate in uv)
                 {
-                    // TEMPORARY UV TEST: V flip controlled by FlipUvV.
                     il2CppUv.Add(new Vector4(
                         coordinate.x,
-                        FlipUvV ? 1f - coordinate.y : coordinate.y,
+                        flipV ? 1f - coordinate.y : coordinate.y,
                         0f,
                         0f));
                 }
@@ -892,7 +895,7 @@ namespace ULTRADROID.Models
                 new Il2CppReferenceArray<Material>(
                     submeshMaterials.ToArray());
 
-            if (colliders)
+            if (options.CreateColliders)
             {
                 MeshCollider collider =
                     gameObject.AddComponent<MeshCollider>();
