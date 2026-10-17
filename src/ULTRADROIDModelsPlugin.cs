@@ -15,11 +15,9 @@ namespace ULTRADROID.Models
         public override void Load()
         {
             Log.LogInfo(
-                "[ULTRADROID Models API] Version 0.1.4 loaded."
-            );
-
-            Log.LogInfo(
-                "[ULTRADROID Models API] GLB texture diagnostics build."
+                "[ULTRADROID Models API] Version " +
+                PluginVersion +
+                " loaded."
             );
         }
     }
