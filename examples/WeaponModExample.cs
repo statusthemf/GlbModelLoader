@@ -11,7 +11,7 @@ using ULTRADROID.Models;
 [BepInPlugin(
     "com.statusthemf.ultradroid.bladesofchaos",
     "ULTRADROID Blades of Chaos",
-    "0.4.6"
+    "0.4.7"
 )]
 [BepInDependency(
     "com.statusthemf.ultradroid.models",
@@ -25,13 +25,11 @@ public sealed class BladesOfChaosPlugin : BasePlugin
     {
         DiagLog = Log;
 
-        Log.LogInfo("[BLADE DEBUG 0.4.6] Plugin starting.");
+        Log.LogInfo("[BLADE DEBUG 0.4.7] Plugin starting.");
         Log.LogInfo("[BLADE DEBUG] Plugin directory: " + Paths.PluginPath);
 
         try
         {
-            Log.LogInfo("[BLADE DEBUG] Adding runner through BepInEx.");
-
             BladesOfChaosDiagnosticRunner runner =
                 AddComponent<BladesOfChaosDiagnosticRunner>();
 
@@ -160,8 +158,7 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
                 nextModelAttempt = Time.unscaledTime + 5f;
 
                 Log(
-                    "[BLADE DEBUG] Attempt failed. " +
-                    "Retrying in five seconds."
+                    "[BLADE DEBUG] Attempt failed. Retrying in five seconds."
                 );
             }
         }
@@ -225,7 +222,6 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
         if (!isLoaded || string.IsNullOrWhiteSpace(sceneName))
             return false;
 
-        // The sandbox is a gameplay environment too.
         if (sceneName.Equals(
             "uk_construct",
             StringComparison.OrdinalIgnoreCase))
@@ -256,7 +252,6 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
                 return false;
         }
 
-        // Recognize level names such as "Level 7-1" and "0-1".
         for (int i = 0; i + 2 < sceneName.Length; i++)
         {
             if (char.IsDigit(sceneName[i]) &&
@@ -363,12 +358,9 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
                 Log(
                     "[BLADE DEBUG] GLB header: magic=0x" +
                     magic.ToString("X8") +
-                    ", version=" +
-                    version +
-                    ", declaredLength=" +
-                    length +
-                    ", actualLength=" +
-                    stream.Length
+                    ", version=" + version +
+                    ", declaredLength=" + length +
+                    ", actualLength=" + stream.Length
                 );
 
                 if (magic != 0x46546C67)
@@ -390,20 +382,24 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
                 }
             }
 
-            Log("[BLADE DEBUG] Calling ModelAPI.LoadGLB with textures disabled.");
+            // TEXTURE DIAGNOSTICS:
+            // Explicitly enable texture loading in the Model API.
+            var options = new ModelLoadOptions
+            {
+                Name = "ULTRADROID_BladesOfChaos_DebugModel",
+                Position = new Vector3(0f, 0f, 2f),
+                RotationEuler = Vector3.zero,
+                Scale = new Vector3(0.1f, 0.1f, 0.1f),
+                LoadTextures = true,
+                CreateColliders = false
+            };
+
+            Log("[BLADE DEBUG] Calling ModelAPI.LoadGLB with textures ENABLED.");
 
             GameObject result = ModelAPI.LoadGLB(
                 path,
                 camera.transform,
-                new ModelLoadOptions
-                {
-                    Name = "ULTRADROID_BladesOfChaos_DebugModel",
-                    Position = new Vector3(0f, 0f, 2f),
-                    RotationEuler = Vector3.zero,
-                    Scale = new Vector3(0.1f, 0.1f, 0.1f),
-                    LoadTextures = true,
-                    CreateColliders = false
-                }
+                options
             );
 
             if (result == null)
@@ -437,13 +433,46 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
 
             foreach (Renderer renderer in renderers)
             {
-                if (renderer != null)
+                if (renderer == null)
+                    continue;
+
+                Log(
+                    "[BLADE DEBUG] Renderer: " +
+                    renderer.name +
+                    ", enabled=" +
+                    renderer.enabled +
+                    ", materialSlots=" +
+                    renderer.sharedMaterials.Length
+                );
+
+                foreach (Material material in renderer.sharedMaterials)
                 {
+                    if (material == null)
+                    {
+                        Log("[BLADE DEBUG] Renderer contains a null material.");
+                        continue;
+                    }
+
+                    Texture texture = null;
+
+                    if (material.HasProperty("_MainTex"))
+                        texture = material.GetTexture("_MainTex");
+
+                    if (texture == null && material.HasProperty("_BaseMap"))
+                        texture = material.GetTexture("_BaseMap");
+
                     Log(
-                        "[BLADE DEBUG] Renderer: " +
-                        renderer.name +
-                        ", enabled=" +
-                        renderer.enabled
+                        "[BLADE DEBUG] Material: " + material.name +
+                        ", shader=" +
+                        (material.shader != null
+                            ? material.shader.name
+                            : "null") +
+                        ", texture=" +
+                        (texture != null ? texture.name : "null") +
+                        ", textureSize=" +
+                        (texture != null
+                            ? texture.width + "x" + texture.height
+                            : "n/a")
                     );
                 }
             }
