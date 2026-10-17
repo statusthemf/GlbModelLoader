@@ -35,8 +35,11 @@ namespace ULTRADROID.Models
                 White();
 
                 if (p >= s.Length || s[p] != c)
+                {
                     throw new InvalidDataException(
-                        "Expected '" + c + "' at JSON position " + p);
+                        "Expected '" + c +
+                        "' at JSON position " + p);
+                }
 
                 p++;
             }
@@ -46,7 +49,8 @@ namespace ULTRADROID.Models
                 White();
 
                 if (p >= s.Length)
-                    throw new InvalidDataException("Unexpected end of JSON.");
+                    throw new InvalidDataException(
+                        "Unexpected end of JSON.");
 
                 char c = s[p];
 
@@ -70,8 +74,11 @@ namespace ULTRADROID.Models
                 if (p + word.Length > s.Length)
                     return false;
 
-                if (string.CompareOrdinal(s, p, word, 0, word.Length) != 0)
+                if (string.CompareOrdinal(
+                    s, p, word, 0, word.Length) != 0)
+                {
                     return false;
+                }
 
                 p += word.Length;
                 return true;
@@ -95,14 +102,19 @@ namespace ULTRADROID.Models
                     White();
 
                     if (Peek() != '"')
+                    {
                         throw new InvalidDataException(
                             "Expected JSON object key at position " + p);
+                    }
 
                     string key = ReadString();
                     Expect(':');
 
                     if (result.ContainsKey(key))
-                        throw new InvalidDataException("Duplicate JSON key: " + key);
+                    {
+                        throw new InvalidDataException(
+                            "Duplicate JSON key: " + key);
+                    }
 
                     result.Add(key, ReadValue());
 
@@ -160,8 +172,10 @@ namespace ULTRADROID.Models
                         return result.ToString();
 
                     if (c < 0x20)
+                    {
                         throw new InvalidDataException(
                             "Unescaped control character in JSON string.");
+                    }
 
                     if (c != '\\')
                     {
@@ -170,25 +184,53 @@ namespace ULTRADROID.Models
                     }
 
                     if (p >= s.Length)
-                        throw new InvalidDataException("Incomplete JSON escape.");
+                    {
+                        throw new InvalidDataException(
+                            "Incomplete JSON escape.");
+                    }
 
                     char e = s[p++];
 
                     switch (e)
                     {
-                        case '"': result.Append('"'); break;
-                        case '\\': result.Append('\\'); break;
-                        case '/': result.Append('/'); break;
-                        case 'b': result.Append('\b'); break;
-                        case 'f': result.Append('\f'); break;
-                        case 'n': result.Append('\n'); break;
-                        case 'r': result.Append('\r'); break;
-                        case 't': result.Append('\t'); break;
+                        case '"':
+                            result.Append('"');
+                            break;
+
+                        case '\\':
+                            result.Append('\\');
+                            break;
+
+                        case '/':
+                            result.Append('/');
+                            break;
+
+                        case 'b':
+                            result.Append('\b');
+                            break;
+
+                        case 'f':
+                            result.Append('\f');
+                            break;
+
+                        case 'n':
+                            result.Append('\n');
+                            break;
+
+                        case 'r':
+                            result.Append('\r');
+                            break;
+
+                        case 't':
+                            result.Append('\t');
+                            break;
 
                         case 'u':
                             if (p + 4 > s.Length)
+                            {
                                 throw new InvalidDataException(
                                     "Incomplete Unicode escape.");
+                            }
 
                             int code;
 
@@ -212,7 +254,8 @@ namespace ULTRADROID.Models
                     }
                 }
 
-                throw new InvalidDataException("Unterminated JSON string.");
+                throw new InvalidDataException(
+                    "Unterminated JSON string.");
             }
 
             private double ReadNumber()
@@ -223,7 +266,10 @@ namespace ULTRADROID.Models
                     p++;
 
                 if (p >= s.Length)
-                    throw new InvalidDataException("Invalid JSON number.");
+                {
+                    throw new InvalidDataException(
+                        "Invalid JSON number.");
+                }
 
                 if (s[p] == '0')
                 {
@@ -232,10 +278,16 @@ namespace ULTRADROID.Models
                 else
                 {
                     if (s[p] < '1' || s[p] > '9')
-                        throw new InvalidDataException("Invalid JSON number.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid JSON number.");
+                    }
 
-                    while (p < s.Length && s[p] >= '0' && s[p] <= '9')
+                    while (p < s.Length &&
+                           s[p] >= '0' && s[p] <= '9')
+                    {
                         p++;
+                    }
                 }
 
                 if (p < s.Length && s[p] == '.')
@@ -243,28 +295,43 @@ namespace ULTRADROID.Models
                     p++;
                     int fractionStart = p;
 
-                    while (p < s.Length && s[p] >= '0' && s[p] <= '9')
+                    while (p < s.Length &&
+                           s[p] >= '0' && s[p] <= '9')
+                    {
                         p++;
+                    }
 
                     if (p == fractionStart)
+                    {
                         throw new InvalidDataException(
                             "Invalid JSON fractional number.");
+                    }
                 }
 
-                if (p < s.Length && (s[p] == 'e' || s[p] == 'E'))
+                if (p < s.Length &&
+                    (s[p] == 'e' || s[p] == 'E'))
                 {
                     p++;
 
-                    if (p < s.Length && (s[p] == '+' || s[p] == '-'))
+                    if (p < s.Length &&
+                        (s[p] == '+' || s[p] == '-'))
+                    {
                         p++;
+                    }
 
                     int exponentStart = p;
 
-                    while (p < s.Length && s[p] >= '0' && s[p] <= '9')
+                    while (p < s.Length &&
+                           s[p] >= '0' && s[p] <= '9')
+                    {
                         p++;
+                    }
 
                     if (p == exponentStart)
-                        throw new InvalidDataException("Invalid JSON exponent.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid JSON exponent.");
+                    }
                 }
 
                 double value;
@@ -275,11 +342,16 @@ namespace ULTRADROID.Models
                     CultureInfo.InvariantCulture,
                     out value))
                 {
-                    throw new InvalidDataException("Could not parse JSON number.");
+                    throw new InvalidDataException(
+                        "Could not parse JSON number.");
                 }
 
-                if (double.IsNaN(value) || double.IsInfinity(value))
-                    throw new InvalidDataException("Non-finite JSON number.");
+                if (double.IsNaN(value) ||
+                    double.IsInfinity(value))
+                {
+                    throw new InvalidDataException(
+                        "Non-finite JSON number.");
+                }
 
                 return value;
             }
@@ -289,8 +361,10 @@ namespace ULTRADROID.Models
                 White();
 
                 if (p != s.Length)
+                {
                     throw new InvalidDataException(
                         "Unexpected trailing JSON data at position " + p);
+                }
             }
         }
 
@@ -304,11 +378,14 @@ namespace ULTRADROID.Models
             return value as List<object>;
         }
 
-        private static object Get(Dictionary<string, object> obj, string key)
+        private static object Get(
+            Dictionary<string, object> obj,
+            string key)
         {
             object value;
 
-            return obj != null && obj.TryGetValue(key, out value)
+            return obj != null &&
+                   obj.TryGetValue(key, out value)
                 ? value
                 : null;
         }
@@ -324,7 +401,10 @@ namespace ULTRADROID.Models
                 return fallback;
 
             if (!(value is double))
-                throw new InvalidDataException("Expected integer field: " + key);
+            {
+                throw new InvalidDataException(
+                    "Expected integer field: " + key);
+            }
 
             double number = (double)value;
 
@@ -332,7 +412,8 @@ namespace ULTRADROID.Models
                 number < int.MinValue ||
                 number > int.MaxValue)
             {
-                throw new InvalidDataException("Invalid integer field: " + key);
+                throw new InvalidDataException(
+                    "Invalid integer field: " + key);
             }
 
             return (int)number;
@@ -351,7 +432,10 @@ namespace ULTRADROID.Models
             string result = value as string;
 
             if (result == null)
-                throw new InvalidDataException("Expected string field: " + key);
+            {
+                throw new InvalidDataException(
+                    "Expected string field: " + key);
+            }
 
             return result;
         }
@@ -367,12 +451,17 @@ namespace ULTRADROID.Models
                 return fallback;
 
             if (!(value is bool))
-                throw new InvalidDataException("Expected boolean field: " + key);
+            {
+                throw new InvalidDataException(
+                    "Expected boolean field: " + key);
+            }
 
             return (bool)value;
         }
 
-        private static float[] Floats(object value, string field)
+        private static float[] Floats(
+            object value,
+            string field)
         {
             if (value == null)
                 return null;
@@ -380,19 +469,27 @@ namespace ULTRADROID.Models
             List<object> array = Arr(value);
 
             if (array == null)
-                throw new InvalidDataException("Expected numeric array: " + field);
+            {
+                throw new InvalidDataException(
+                    "Expected numeric array: " + field);
+            }
 
             float[] result = new float[array.Count];
 
             for (int i = 0; i < array.Count; i++)
             {
                 if (!(array[i] is double))
-                    throw new InvalidDataException("Expected number in " + field);
+                {
+                    throw new InvalidDataException(
+                        "Expected number in " + field);
+                }
 
                 double number = (double)array[i];
 
-                if (double.IsNaN(number) || double.IsInfinity(number) ||
-                    number < -float.MaxValue || number > float.MaxValue)
+                if (double.IsNaN(number) ||
+                    double.IsInfinity(number) ||
+                    number < -float.MaxValue ||
+                    number > float.MaxValue)
                 {
                     throw new InvalidDataException(
                         "Number outside float range in " + field);
@@ -404,7 +501,9 @@ namespace ULTRADROID.Models
             return result;
         }
 
-        private static int[] Ints(object value, string field)
+        private static int[] Ints(
+            object value,
+            string field)
         {
             if (value == null)
                 return null;
@@ -412,14 +511,20 @@ namespace ULTRADROID.Models
             List<object> array = Arr(value);
 
             if (array == null)
-                throw new InvalidDataException("Expected integer array: " + field);
+            {
+                throw new InvalidDataException(
+                    "Expected integer array: " + field);
+            }
 
             int[] result = new int[array.Count];
 
             for (int i = 0; i < array.Count; i++)
             {
                 if (!(array[i] is double))
-                    throw new InvalidDataException("Expected integer in " + field);
+                {
+                    throw new InvalidDataException(
+                        "Expected integer in " + field);
+                }
 
                 double number = (double)array[i];
 
@@ -427,7 +532,8 @@ namespace ULTRADROID.Models
                     number < int.MinValue ||
                     number > int.MaxValue)
                 {
-                    throw new InvalidDataException("Invalid integer in " + field);
+                    throw new InvalidDataException(
+                        "Invalid integer in " + field);
                 }
 
                 result[i] = (int)number;
@@ -447,7 +553,10 @@ namespace ULTRADROID.Models
             List<object> source = Arr(value);
 
             if (source == null)
-                throw new InvalidDataException("Expected array: " + field);
+            {
+                throw new InvalidDataException(
+                    "Expected array: " + field);
+            }
 
             T[] result = new T[source.Count];
 
@@ -468,12 +577,17 @@ namespace ULTRADROID.Models
                 return fallback;
 
             if (!(value is double))
-                throw new InvalidDataException("Expected number field: " + key);
+            {
+                throw new InvalidDataException(
+                    "Expected number field: " + key);
+            }
 
             double number = (double)value;
 
-            if (double.IsNaN(number) || double.IsInfinity(number) ||
-                number < -float.MaxValue || number > float.MaxValue)
+            if (double.IsNaN(number) ||
+                double.IsInfinity(number) ||
+                number < -float.MaxValue ||
+                number > float.MaxValue)
             {
                 throw new InvalidDataException(
                     "Number outside float range: " + key);
@@ -491,12 +605,15 @@ namespace ULTRADROID.Models
             Dictionary<string, object> obj = Obj(parsed);
 
             if (obj == null)
+            {
                 throw new InvalidDataException(
                     "glTF JSON root must be an object.");
+            }
 
             var root = new GltfRoot();
 
-            Dictionary<string, object> asset = Obj(Get(obj, "asset"));
+            Dictionary<string, object> asset =
+                Obj(Get(obj, "asset"));
 
             if (asset != null)
             {
@@ -516,11 +633,16 @@ namespace ULTRADROID.Models
                     var o = Obj(value);
 
                     if (o == null)
-                        throw new InvalidDataException("Invalid scene entry.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid scene entry.");
+                    }
 
                     return new GltfScene
                     {
-                        nodes = Ints(Get(o, "nodes"), "scenes.nodes")
+                        nodes = Ints(
+                            Get(o, "nodes"),
+                            "scenes.nodes")
                     };
                 });
 
@@ -532,17 +654,30 @@ namespace ULTRADROID.Models
                     var o = Obj(value);
 
                     if (o == null)
-                        throw new InvalidDataException("Invalid node entry.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid node entry.");
+                    }
 
                     return new GltfNode
                     {
                         name = Str(o, "name"),
                         mesh = Int(o, "mesh", -1),
-                        children = Ints(Get(o, "children"), "nodes.children"),
-                        translation = Floats(Get(o, "translation"), "nodes.translation"),
-                        rotation = Floats(Get(o, "rotation"), "nodes.rotation"),
-                        scale = Floats(Get(o, "scale"), "nodes.scale"),
-                        matrix = Floats(Get(o, "matrix"), "nodes.matrix")
+                        children = Ints(
+                            Get(o, "children"),
+                            "nodes.children"),
+                        translation = Floats(
+                            Get(o, "translation"),
+                            "nodes.translation"),
+                        rotation = Floats(
+                            Get(o, "rotation"),
+                            "nodes.rotation"),
+                        scale = Floats(
+                            Get(o, "scale"),
+                            "nodes.scale"),
+                        matrix = Floats(
+                            Get(o, "matrix"),
+                            "nodes.matrix")
                     };
                 });
 
@@ -554,32 +689,46 @@ namespace ULTRADROID.Models
                     var o = Obj(value);
 
                     if (o == null)
-                        throw new InvalidDataException("Invalid mesh entry.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid mesh entry.");
+                    }
 
                     return new GltfMesh
                     {
                         name = Str(o, "name"),
+
                         primitives = Array(
                             Get(o, "primitives"),
                             "meshes.primitives",
                             primitiveValue =>
                             {
-                                var primitive = Obj(primitiveValue);
+                                var primitive =
+                                    Obj(primitiveValue);
 
                                 if (primitive == null)
-                                    throw new InvalidDataException("Invalid primitive.");
+                                {
+                                    throw new InvalidDataException(
+                                        "Invalid primitive.");
+                                }
 
-                                var attributes = new GltfAttributes();
-                                var attributeObject = Obj(Get(primitive, "attributes"));
+                                var attributes =
+                                    new GltfAttributes();
+
+                                var attributeObject =
+                                    Obj(Get(primitive, "attributes"));
 
                                 if (attributeObject != null)
                                 {
                                     attributes.POSITION =
                                         Int(attributeObject, "POSITION", -1);
+
                                     attributes.NORMAL =
                                         Int(attributeObject, "NORMAL", -1);
+
                                     attributes.TANGENT =
                                         Int(attributeObject, "TANGENT", -1);
+
                                     attributes.TEXCOORD_0 =
                                         Int(attributeObject, "TEXCOORD_0", -1);
                                 }
@@ -587,9 +736,12 @@ namespace ULTRADROID.Models
                                 return new GltfPrimitive
                                 {
                                     attributes = attributes,
-                                    indices = Int(primitive, "indices", -1),
-                                    material = Int(primitive, "material", -1),
-                                    mode = Int(primitive, "mode", 4)
+                                    indices = Int(
+                                        primitive, "indices", -1),
+                                    material = Int(
+                                        primitive, "material", -1),
+                                    mode = Int(
+                                        primitive, "mode", 4)
                                 };
                             })
                     };
@@ -603,47 +755,54 @@ namespace ULTRADROID.Models
                     var o = Obj(value);
 
                     if (o == null)
-                        throw new InvalidDataException("Invalid material entry.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid material entry.");
+                    }
 
                     var material = new GltfMaterial
                     {
                         name = Str(o, "name"),
+
                         emissiveFactor = Floats(
                             Get(o, "emissiveFactor"),
                             "materials.emissiveFactor")
                     };
 
-                    var pbr = Obj(Get(o, "pbrMetallicRoughness"));
+                    var pbr =
+                        Obj(Get(o, "pbrMetallicRoughness"));
 
                     if (pbr != null)
                     {
-                        var converted = new PbrMetallicRoughness
-                        {
-                            baseColorFactor = Floats(
-                                Get(pbr, "baseColorFactor"),
-                                "baseColorFactor"),
+                        var converted =
+                            new PbrMetallicRoughness
+                            {
+                                baseColorFactor = Floats(
+                                    Get(pbr, "baseColorFactor"),
+                                    "baseColorFactor"),
 
-                            metallicFactor = FloatValue(
-                                pbr, "metallicFactor", 1f),
+                                metallicFactor = FloatValue(
+                                    pbr, "metallicFactor", 1f),
 
-                            roughnessFactor = FloatValue(
-                                pbr, "roughnessFactor", 1f)
-                        };
+                                roughnessFactor = FloatValue(
+                                    pbr, "roughnessFactor", 1f)
+                            };
 
-                        var baseTexture = Obj(
-                            Get(pbr, "baseColorTexture"));
+                        var baseTexture =
+                            Obj(Get(pbr, "baseColorTexture"));
 
                         if (baseTexture != null)
                         {
-                            converted.baseColorTexture = new GltfTextureInfo
-                            {
-                                index = Int(baseTexture, "index", -1)
-                            };
+                            converted.baseColorTexture =
+                                new GltfTextureInfo
+                                {
+                                    index = Int(
+                                        baseTexture, "index", -1)
+                                };
                         }
 
-                        // Parse the glTF metallic-roughness texture.
-                        var metallicRoughnessTexture = Obj(
-                            Get(pbr, "metallicRoughnessTexture"));
+                        var metallicRoughnessTexture =
+                            Obj(Get(pbr, "metallicRoughnessTexture"));
 
                         if (metallicRoughnessTexture != null)
                         {
@@ -671,7 +830,10 @@ namespace ULTRADROID.Models
                     var o = Obj(value);
 
                     if (o == null)
-                        throw new InvalidDataException("Invalid texture entry.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid texture entry.");
+                    }
 
                     return new GltfTexture
                     {
@@ -687,7 +849,10 @@ namespace ULTRADROID.Models
                     var o = Obj(value);
 
                     if (o == null)
-                        throw new InvalidDataException("Invalid image entry.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid image entry.");
+                    }
 
                     return new GltfImage
                     {
@@ -704,7 +869,10 @@ namespace ULTRADROID.Models
                     var o = Obj(value);
 
                     if (o == null)
-                        throw new InvalidDataException("Invalid bufferView entry.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid bufferView entry.");
+                    }
 
                     return new GltfBufferView
                     {
@@ -723,7 +891,10 @@ namespace ULTRADROID.Models
                     var o = Obj(value);
 
                     if (o == null)
-                        throw new InvalidDataException("Invalid accessor entry.");
+                    {
+                        throw new InvalidDataException(
+                            "Invalid accessor entry.");
+                    }
 
                     return new GltfAccessor
                     {
@@ -733,6 +904,118 @@ namespace ULTRADROID.Models
                         count = Int(o, "count", 0),
                         type = Str(o, "type"),
                         normalized = Bool(o, "normalized", false)
+                    };
+                });
+
+            // -------------------------------------------------
+            // NEW: Parse animation clips, samplers and channels.
+            // -------------------------------------------------
+
+            root.animations = Array(
+                Get(obj, "animations"),
+                "animations",
+                value =>
+                {
+                    var o = Obj(value);
+
+                    if (o == null)
+                    {
+                        throw new InvalidDataException(
+                            "Invalid animation entry.");
+                    }
+
+                    return new GltfAnimation
+                    {
+                        name = Str(o, "name"),
+
+                        samplers = Array(
+                            Get(o, "samplers"),
+                            "animations.samplers",
+                            samplerValue =>
+                            {
+                                var sampler = Obj(samplerValue);
+
+                                if (sampler == null)
+                                {
+                                    throw new InvalidDataException(
+                                        "Invalid animation sampler.");
+                                }
+
+                                string interpolation =
+                                    Str(
+                                        sampler,
+                                        "interpolation",
+                                        "LINEAR");
+
+                                if (interpolation != "LINEAR" &&
+                                    interpolation != "STEP" &&
+                                    interpolation != "CUBICSPLINE")
+                                {
+                                    throw new InvalidDataException(
+                                        "Unsupported animation interpolation: " +
+                                        interpolation);
+                                }
+
+                                return new GltfAnimationSampler
+                                {
+                                    input = Int(
+                                        sampler, "input", -1),
+
+                                    output = Int(
+                                        sampler, "output", -1),
+
+                                    interpolation = interpolation
+                                };
+                            }),
+
+                        channels = Array(
+                            Get(o, "channels"),
+                            "animations.channels",
+                            channelValue =>
+                            {
+                                var channel = Obj(channelValue);
+
+                                if (channel == null)
+                                {
+                                    throw new InvalidDataException(
+                                        "Invalid animation channel.");
+                                }
+
+                                var target =
+                                    Obj(Get(channel, "target"));
+
+                                if (target == null)
+                                {
+                                    throw new InvalidDataException(
+                                        "Invalid animation target.");
+                                }
+
+                                string path = Str(target, "path");
+
+                                if (path != "translation" &&
+                                    path != "rotation" &&
+                                    path != "scale" &&
+                                    path != "weights")
+                                {
+                                    throw new InvalidDataException(
+                                        "Unsupported animation target path: " +
+                                        path);
+                                }
+
+                                return new GltfAnimationChannel
+                                {
+                                    sampler = Int(
+                                        channel, "sampler", -1),
+
+                                    target = new GltfAnimationTarget
+                                    {
+                                        node = Int(
+                                            target, "node", -1),
+
+                                        path = path
+                                    }
+                                };
+                            })
                     };
                 });
 
