@@ -385,13 +385,13 @@ public sealed class BladesOfChaosDiagnosticRunner : MonoBehaviour
             // TEXTURE DIAGNOSTICS:
             // Explicitly enable texture loading in the Model API.
             var options = new ModelLoadOptions
-            {
-                Name = "ULTRADROID_BladesOfChaos_DebugModel",
-                Position = new Vector3(0f, 0f, 2f),
-                RotationEuler = Vector3.zero,
-                Scale = new Vector3(0.1f, 0.1f, 0.1f),
-                LoadTextures = true,
-                CreateColliders = false
+           {
+               Name = "ULTRADROID_BladesOfChaos_DebugModel",
+               Position = new Vector3(0.45f, -0.45f, 1.2f),
+               RotationEuler = Vector3.zero,
+               Scale = new Vector3(0.1f, 0.1f, 0.1f),
+               LoadTextures = true,
+               CreateColliders = false
             };
 
             Log("[BLADE DEBUG] Calling ModelAPI.LoadGLB with textures ENABLED.");
