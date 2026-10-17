@@ -24,7 +24,8 @@ namespace ULTRADROID.Models
         public const string Version = "0.1.4-texture-diagnostics";
 
         private static readonly ManualLogSource DiagnosticLog =
-            Logger.CreateLogSource("ULTRADROID Models API Diagnostics");
+            BepInEx.Logging.Logger.CreateLogSource(
+                "ULTRADROID Models API Diagnostics");
 
         private static void Log(string message)
         {
@@ -169,7 +170,6 @@ namespace ULTRADROID.Models
                         " skipped: invalid bufferView. " +
                         "This loader currently supports embedded " +
                         "GLB images only.");
-
                     continue;
                 }
 
@@ -183,7 +183,6 @@ namespace ULTRADROID.Models
                 {
                     LogError("[TEXTURE DIAG] Image " + i +
                         ": failed to extract bytes.", ex);
-
                     continue;
                 }
 
@@ -191,7 +190,6 @@ namespace ULTRADROID.Models
                 {
                     Log("[TEXTURE DIAG] Image " + i +
                         ": extracted image data is empty.");
-
                     continue;
                 }
 
@@ -237,13 +235,7 @@ namespace ULTRADROID.Models
                 }
             }
 
-            int loadedCount = 0;
-
-            for (int i = 0; i < result.Length; i++)
-            {
-                if (result[i] != null)
-                    loadedCount++;
-            }
+            int loadedCount = CountLoadedTextures(result);
 
             Log("[TEXTURE DIAG] BuildTextures finished: " +
                 loadedCount + "/" + count + " images loaded.");
@@ -370,7 +362,7 @@ namespace ULTRADROID.Models
                             "_Metallic", pbr.metallicFactor);
                     }
 
-                    // FIXED: closing quotation mark after _Glossiness.
+                    // Fixed missing quotation mark.
                     if (material.HasProperty("_Glossiness"))
                     {
                         material.SetFloat(
@@ -439,7 +431,6 @@ namespace ULTRADROID.Models
             {
                 Log("[MATERIAL DIAG] Invalid texture index: " +
                     textureIndex);
-
                 return -1;
             }
 
@@ -449,7 +440,6 @@ namespace ULTRADROID.Models
             {
                 Log("[MATERIAL DIAG] Texture entry " +
                     textureIndex + " is null.");
-
                 return -1;
             }
 
@@ -480,9 +470,7 @@ namespace ULTRADROID.Models
             {
                 if (sceneIndex < 0 ||
                     sceneIndex >= doc.json.scenes.Length)
-                {
                     sceneIndex = 0;
-                }
 
                 GltfScene scene = doc.json.scenes[sceneIndex];
 
@@ -541,9 +529,7 @@ namespace ULTRADROID.Models
             if (index < 0 ||
                 index >= doc.json.nodes.Length ||
                 guard.Contains(index))
-            {
                 return;
-            }
 
             GltfNode node = doc.json.nodes[index];
 
@@ -657,16 +643,13 @@ namespace ULTRADROID.Models
         {
             if (source.primitives == null ||
                 source.primitives.Length == 0)
-            {
                 return;
-            }
 
             List<Vector3> vertices = new List<Vector3>();
             List<Vector3> normals = new List<Vector3>();
             List<Vector2> uv = new List<Vector2>();
             List<List<int>> submeshTriangles =
                 new List<List<int>>();
-
             List<Material> submeshMaterials =
                 new List<Material>();
 
@@ -678,9 +661,7 @@ namespace ULTRADROID.Models
                 if (primitive == null ||
                     primitive.attributes == null ||
                     primitive.attributes.POSITION < 0)
-                {
                     continue;
-                }
 
                 if (primitive.mode != 4)
                 {
@@ -722,23 +703,15 @@ namespace ULTRADROID.Models
 
                 if (primitiveNormals == null ||
                     primitiveNormals.Length != primitiveVertices.Length)
-                {
                     hasNormals = false;
-                }
                 else
-                {
                     normals.AddRange(primitiveNormals);
-                }
 
                 if (primitiveUv == null ||
                     primitiveUv.Length != primitiveVertices.Length)
-                {
                     hasUv = false;
-                }
                 else
-                {
                     uv.AddRange(primitiveUv);
-                }
 
                 int[] indices = primitive.indices >= 0
                     ? doc.ReadIndices(primitive.indices)
@@ -847,7 +820,6 @@ namespace ULTRADROID.Models
                 }
 
                 mesh.SetUVs(0, il2CppUv);
-
                 Log("[MESH DIAG] UV coordinates applied.");
             }
             else
@@ -980,7 +952,6 @@ namespace ULTRADROID.Models
             try
             {
                 LogParse("Parsing glTF JSON with manual parser.");
-
                 root = GlbManualJsonParser.ParseRoot(jsonText);
             }
             catch (Exception ex)
@@ -1019,7 +990,8 @@ namespace ULTRADROID.Models
 
         private static void LogParse(string message)
         {
-            Logger.CreateLogSource("ULTRADROID Models GLB Parser")
+            BepInEx.Logging.Logger
+                .CreateLogSource("ULTRADROID Models GLB Parser")
                 .LogInfo("[GLB PARSER] " + message);
         }
 
@@ -1027,7 +999,8 @@ namespace ULTRADROID.Models
             string message,
             Exception ex)
         {
-            Logger.CreateLogSource("ULTRADROID Models GLB Parser")
+            BepInEx.Logging.Logger
+                .CreateLogSource("ULTRADROID Models GLB Parser")
                 .LogError("[GLB PARSER] " + message + "\n" + ex);
         }
 
@@ -1094,7 +1067,6 @@ namespace ULTRADROID.Models
             GltfBufferView view = GetView(accessor.bufferView);
 
             int elementSize = components * 4;
-
             int stride = view.byteStride > 0
                 ? view.byteStride
                 : elementSize;
