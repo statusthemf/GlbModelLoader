@@ -20,7 +20,7 @@ namespace ULTRADROID.Models
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.11-metallic-smooth-diag";
+        public const string Version = "0.1.12-metallic-zero-diag";
 
         // UV TEST SWITCH: true = flip V (1 - v), false = use V as-is.
         private const bool FlipUvV = true;
@@ -563,9 +563,10 @@ namespace ULTRADROID.Models
         // metallicFactor and roughnessFactor are baked in here.
         // Returns null (and logs) if the source cannot be read.
         //
-        // DIAGNOSTIC BUILD (0.1.11): metallic is scaled to 75% and
-        // any metalness > 0.25 is forced to at least 0.70 smoothness.
-        // This is a visual test only; it is not physically accurate.
+        // DIAGNOSTIC BUILD (0.1.12): every converted pixel is forced to
+        // (0, 0, 0, 0) — fully non-metallic, fully rough — so we can
+        // observe whether Unity's Standard shader reacts to
+        // _MetallicGlossMap at all. Base color is untouched.
         private static Texture2D BuildUnityMetallicGlossTexture(
             Texture2D source,
             float metallicFactor,
@@ -629,11 +630,11 @@ namespace ULTRADROID.Models
                     byte smoothnessByte = (byte)Mathf.Clamp(
                         Mathf.RoundToInt(smoothness * 255f), 0, 255);
 
-                    convertedPixels[i] = new Color32(
-                        metallicByte,
-                        0,
-                        0,
-                        smoothnessByte);
+                    // DIAGNOSTIC: force fully non-metallic, fully rough.
+                    // Restore the original write after testing:
+                    //   convertedPixels[i] = new Color32(
+                    //       metallicByte, 0, 0, smoothnessByte);
+                    convertedPixels[i] = new Color32(0, 0, 0, 0);
                 }
 
                 // linear = true: this is data, not color.
