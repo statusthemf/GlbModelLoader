@@ -1255,13 +1255,13 @@ namespace ULTRADROID.Models
 
                     skinWeightsApplied = true;
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    LogError(
-                        "Native bone-weight assignment failed. " +
-                        "Using CPU skinning for '" +
-                        gameObject.name + "'.",
-                        ex);
+                    // Expected on runtimes without InternalSetBoneWeights.
+                    // Fall through to CPU skinning.
+                    DiagnosticLog.LogWarning(
+                        "[ULTRADROID Models] Native bone-weight assignment unavailable. Using CPU skinning for '" +
+                        mesh.name + "'.");
                 }
             }
 
