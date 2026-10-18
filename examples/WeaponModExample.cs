@@ -11,7 +11,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using ULTRADROID.Models;
 
-[BepInPlugin("ultradroid.bladesofchaos", "ULTRADROID Blades of Chaos", "0.5.3")]
+[BepInPlugin("ultradroid.bladesofchaos", "ULTRADROID Blades of Chaos", "0.5.4")]
 public sealed class BladesOfChaosPlugin : BasePlugin
 {
     public override void Load()
@@ -19,7 +19,7 @@ public sealed class BladesOfChaosPlugin : BasePlugin
         BladesOfChaosRunner.PluginLog = Log;
         ClassInjector.RegisterTypeInIl2Cpp<BladesOfChaosRunner>();
         AddComponent<BladesOfChaosRunner>();
-        Log.LogInfo("[Blades of Chaos] Plugin 0.5.3 loaded.");
+        Log.LogInfo("[Blades of Chaos] Plugin 0.5.4 diagnostic loaded.");
     }
 }
 
@@ -152,6 +152,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 "Model loaded. Mapped glTF nodes: " +
                 _nodeTransforms.Count);
 
+            LogSkinningDiagnostics();
+            LogMappedHierarchyDiagnostics();
+
             if (_activeAnimation != null)
             {
                 LogInfo(
@@ -162,7 +165,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             else
             {
                 LogWarning(
-                    "The model loaded, but no usable animation clip was found. " +
+                    "No usable animation clip was found. " +
                     "The model will remain visible.");
             }
         }
@@ -305,12 +308,16 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         {
             LogWarning(
                 "Could not read the GLB node hierarchy; " +
-                "animation tracks cannot be attached to transforms.");
+                "animation tracks cannot be mapped.");
             return;
         }
 
         Transform[] allTransforms =
             _modelRoot.GetComponentsInChildren<Transform>(true);
+
+        LogInfo(
+            "UNITY HIERARCHY: transforms=" + allTransforms.Length +
+            ", root='" + _modelRoot.name + "'.");
 
         int sceneIndex = hierarchy.scene;
         int[] rootNodes = null;
@@ -354,6 +361,10 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             rootNodes = inferredRoots.ToArray();
         }
 
+        LogInfo(
+            "GLB HIERARCHY: nodes=" + hierarchy.nodes.Length +
+            ", sceneRoots=" + rootNodes.Length + ".");
+
         for (int i = 0; i < rootNodes.Length; i++)
         {
             MapNodeRecursive(
@@ -377,7 +388,8 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         Transform[] allTransforms,
         int depth)
     {
-        if (nodeIndex < 0 ||
+        if (nodes == null ||
+            nodeIndex < 0 ||
             nodeIndex >= nodes.Length ||
             depth > nodes.Length ||
             _nodeTransforms.ContainsKey(nodeIndex))
@@ -398,14 +410,43 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         if (mapped == null)
         {
-            LogDebug(
-                "No Unity transform found for glTF node " +
-                nodeIndex + " (" + (node.name ?? "unnamed") + ").");
+            LogWarning(
+                "NODE MAP FAILED: node=" + nodeIndex +
+                ", name='" + (node.name ?? "unnamed") +
+                "', expectedParent='" +
+                (expectedParent != null
+                    ? expectedParent.name
+                    : "<null>") + "'.");
+
+            // Continue searching for descendants beneath the nearest
+            // parent that could be mapped.
+            if (node.children != null)
+            {
+                for (int i = 0; i < node.children.Length; i++)
+                {
+                    MapNodeRecursive(
+                        node.children[i],
+                        expectedParent,
+                        nodes,
+                        allTransforms,
+                        depth + 1);
+                }
+            }
+
             return;
         }
 
         _nodeTransforms[nodeIndex] = mapped;
         _mappedTransforms.Add(mapped);
+
+        LogDebug(
+            "NODE MAP OK: glTF node=" + nodeIndex +
+            ", glTF name='" + (node.name ?? "unnamed") +
+            "', Unity name='" + mapped.name +
+            "', Unity ID=" + mapped.GetInstanceID() +
+            ", parent='" +
+            (mapped.parent != null ? mapped.parent.name : "<none>") +
+            "'.");
 
         if (node.children == null)
             return;
@@ -427,57 +468,245 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         Transform expectedParent,
         Transform[] allTransforms)
     {
+        if (expectedParent == null)
+            return null;
+
         string generatedName = "GLTF_Node_" + nodeIndex;
         string alternateName = "Node_" + nodeIndex;
 
-        if (expectedParent != null)
+        // Prefer an exact direct child.
+        for (int i = 0; i < expectedParent.childCount; i++)
         {
-            for (int i = 0; i < expectedParent.childCount; i++)
+            Transform child = expectedParent.GetChild(i);
+
+            if (child == null ||
+                _mappedTransforms.Contains(child))
             {
-                Transform child = expectedParent.GetChild(i);
+                continue;
+            }
 
-                if (child == null ||
-                    _mappedTransforms.Contains(child))
-                {
-                    continue;
-                }
-
-                if ((!string.IsNullOrEmpty(node.name) &&
-                     child.name == node.name) ||
-                    child.name == generatedName ||
-                    child.name == alternateName)
-                {
-                    return child;
-                }
+            if (IsExpectedNodeName(
+                child.name,
+                node.name,
+                generatedName,
+                alternateName))
+            {
+                return child;
             }
         }
+
+        // Some loaders add wrapper transforms. Search descendants,
+        // but never search unrelated branches of the model.
+        Transform bestMatch = null;
+        int bestDepth = int.MaxValue;
 
         for (int i = 0; i < allTransforms.Length; i++)
         {
             Transform candidate = allTransforms[i];
 
             if (candidate == null ||
+                candidate == expectedParent ||
                 candidate == _modelRoot.transform ||
                 _mappedTransforms.Contains(candidate))
             {
                 continue;
             }
 
-            if ((!string.IsNullOrEmpty(node.name) &&
-                 candidate.name == node.name) ||
-                candidate.name == generatedName ||
-                candidate.name == alternateName)
+            if (!IsExpectedNodeName(
+                candidate.name,
+                node.name,
+                generatedName,
+                alternateName))
             {
-                return candidate;
+                continue;
             }
+
+            int candidateDepth =
+                GetDepthBelow(candidate, expectedParent);
+
+            if (candidateDepth < 0)
+                continue;
+
+            if (candidateDepth < bestDepth)
+            {
+                bestMatch = candidate;
+                bestDepth = candidateDepth;
+            }
+        }
+
+        if (bestMatch != null)
+        {
+            LogDebug(
+                "NODE MAP WRAPPER MATCH: node=" + nodeIndex +
+                ", name='" + bestMatch.name +
+                "', depth=" + bestDepth + ".");
+
+            return bestMatch;
         }
 
         return null;
     }
 
-    // Detailed animation diagnostics.
-    // Logs sampled values and the actual Unity transform values
-    // for the first five animation tracks.
+    private static bool IsExpectedNodeName(
+        string candidateName,
+        string originalName,
+        string generatedName,
+        string alternateName)
+    {
+        if (string.IsNullOrEmpty(candidateName))
+            return false;
+
+        return (!string.IsNullOrEmpty(originalName) &&
+                string.Equals(
+                    candidateName,
+                    originalName,
+                    StringComparison.Ordinal)) ||
+               string.Equals(
+                    candidateName,
+                    generatedName,
+                    StringComparison.Ordinal) ||
+               string.Equals(
+                    candidateName,
+                    alternateName,
+                    StringComparison.Ordinal);
+    }
+
+    private static int GetDepthBelow(
+        Transform candidate,
+        Transform expectedParent)
+    {
+        if (candidate == null || expectedParent == null)
+            return -1;
+
+        int depth = 0;
+        Transform current = candidate;
+
+        while (current != null && depth <= 1000)
+        {
+            if (current == expectedParent)
+                return depth;
+
+            current = current.parent;
+            depth++;
+        }
+
+        return -1;
+    }
+
+    private void LogMappedHierarchyDiagnostics()
+    {
+        int shown = 0;
+
+        foreach (KeyValuePair<int, Transform> pair in _nodeTransforms)
+        {
+            if (shown >= 12)
+                break;
+
+            Transform target = pair.Value;
+
+            if (target == null)
+                continue;
+
+            LogInfo(
+                "MAPPED NODE: glTF=" + pair.Key +
+                ", transform='" + target.name +
+                "', ID=" + target.GetInstanceID() +
+                ", parent='" +
+                (target.parent != null ? target.parent.name : "<none>") +
+                "', children=" + target.childCount +
+                ", localPosition=" + target.localPosition +
+                ", localRotation=" + target.localRotation);
+
+            shown++;
+        }
+
+        LogInfo(
+            "MAPPED NODE DIAGNOSTICS: displayed " +
+            shown + " entries.");
+    }
+
+    private void LogSkinningDiagnostics()
+    {
+        if (_modelRoot == null)
+            return;
+
+        SkinnedMeshRenderer[] skinnedRenderers =
+            _modelRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+
+        MeshRenderer[] meshRenderers =
+            _modelRoot.GetComponentsInChildren<MeshRenderer>(true);
+
+        LogInfo(
+            "RENDER DIAGNOSTIC: skinnedRenderers=" +
+            skinnedRenderers.Length +
+            ", staticMeshRenderers=" + meshRenderers.Length + ".");
+
+        int totalBones = 0;
+        int mappedBones = 0;
+
+        for (int r = 0; r < skinnedRenderers.Length; r++)
+        {
+            SkinnedMeshRenderer renderer = skinnedRenderers[r];
+
+            if (renderer == null)
+                continue;
+
+            Transform[] bones = renderer.bones;
+            int boneCount = bones != null ? bones.Length : 0;
+            int rendererMappedBones = 0;
+
+            totalBones += boneCount;
+
+            for (int b = 0; b < boneCount; b++)
+            {
+                Transform bone = bones[b];
+
+                if (bone == null)
+                    continue;
+
+                foreach (KeyValuePair<int, Transform> pair in _nodeTransforms)
+                {
+                    if (pair.Value == bone)
+                    {
+                        rendererMappedBones++;
+                        mappedBones++;
+                        break;
+                    }
+                }
+            }
+
+            LogInfo(
+                "SKINNING: renderer='" + renderer.name +
+                "', enabled=" + renderer.enabled +
+                ", bones=" + boneCount +
+                ", mappedAnimationBones=" + rendererMappedBones +
+                ", mesh='" +
+                (renderer.sharedMesh != null
+                    ? renderer.sharedMesh.name
+                    : "<null>") + "'.");
+        }
+
+        LogInfo(
+            "SKINNING SUMMARY: mappedBones=" +
+            mappedBones + "/" + totalBones + ".");
+
+        for (int i = 0; i < meshRenderers.Length && i < 8; i++)
+        {
+            MeshRenderer renderer = meshRenderers[i];
+
+            if (renderer == null)
+                continue;
+
+            LogInfo(
+                "STATIC MESH: renderer='" + renderer.name +
+                "', enabled=" + renderer.enabled +
+                ", parent='" +
+                (renderer.transform.parent != null
+                    ? renderer.transform.parent.name
+                    : "<none>") + "'.");
+        }
+    }
+
     private void UpdateAnimation(float deltaTime)
     {
         if (_activeAnimation == null ||
@@ -594,6 +823,8 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
             if (i < detailCount)
             {
+                Transform parent = target.parent;
+
                 details.Append(
                     "\nTRACK " + i +
                     ": node=" + track.TargetNode +
@@ -601,6 +832,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                     ", interpolation=" + track.Interpolation +
                     ", targetName=" + target.name +
                     ", targetID=" + target.GetInstanceID() +
+                    ", parent=" +
+                    (parent != null ? parent.name : "<none>") +
+                    ", children=" + target.childCount +
                     ", sampled=[");
 
                 for (int c = 0; c < components; c++)
@@ -928,7 +1162,6 @@ public sealed class GlbNodeData
     public int[] children;
 }
 
-// Small JSON reader for hierarchy fields only.
 public static class GlbHierarchyParser
 {
     public static GlbHierarchyData Parse(string json)
