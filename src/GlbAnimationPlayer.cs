@@ -7,11 +7,6 @@ using UnityEngine;
 
 namespace ULTRADROID.Models
 {
-    /// <summary>
-    /// Plays animations stored in a GLB model.
-    /// GlbAnimationData and GlbAnimationTrack remain defined
-    /// in GlbModelLoader.cs.
-    /// </summary>
     public sealed class GlbAnimationPlayer
     {
         private readonly GameObject _root;
@@ -34,7 +29,6 @@ namespace ULTRADROID.Models
         }
 
         public float PlaybackSpeed { get; set; } = 1f;
-
         public bool Loop { get; set; } = true;
 
         public string CurrentAnimationName
@@ -105,9 +99,7 @@ namespace ULTRADROID.Models
         {
             if (animationIndex < 0 ||
                 animationIndex >= _animations.Length)
-            {
                 return false;
-            }
 
             return PlayAnimation(_animations[animationIndex], loop);
         }
@@ -189,17 +181,19 @@ namespace ULTRADROID.Models
             }
             else
             {
-                if (_time >= duration)
+                if (PlaybackSpeed >= 0f && _time >= duration)
                 {
                     _time = duration;
                     _playing = false;
                 }
-                else if (_time <= 0f && PlaybackSpeed < 0f)
+                else if (PlaybackSpeed < 0f && _time <= 0f)
                 {
                     _time = 0f;
                     _playing = false;
                 }
             }
+
+            _time = Mathf.Clamp(_time, 0f, duration);
 
             SampleAnimation(_time);
             UpdateSkinning();
@@ -214,7 +208,7 @@ namespace ULTRADROID.Models
             {
                 ModelAPI.UpdateCpuSkinning(_root);
             }
-            catch (Exception)
+            catch
             {
                 // Models without CPU-skinned meshes need no extra work.
             }
@@ -248,9 +242,7 @@ namespace ULTRADROID.Models
 
                 if (nodeIndex < 0 ||
                     nodeIndex >= _nodeTransforms.Length)
-                {
                     continue;
-                }
 
                 Transform target = _nodeTransforms[nodeIndex];
 
@@ -278,9 +270,7 @@ namespace ULTRADROID.Models
 
                 if (times == null || times.Length == 0 ||
                     values == null || values.Length == 0)
-                {
                     continue;
-                }
 
                 int components = GetInt(
                     track,
@@ -360,24 +350,16 @@ namespace ULTRADROID.Models
                 ? Mathf.Clamp01((time - times[first]) / segmentDuration)
                 : 0f;
 
-            if (step || first == second)
-                t = 0f;
-
             float[] result = new float[components];
 
             if (cubic)
             {
-                // glTF CUBICSPLINE stores three values per key:
-                // incoming tangent, key value, outgoing tangent.
-                int keyStride = components * 3;
+                int stride = components * 3;
 
-                int firstValueOffset = first * keyStride + components;
-                int secondValueOffset = second * keyStride + components;
-
-                int firstOutTangentOffset = first * keyStride
-                    + components * 2;
-
-                int secondInTangentOffset = second * keyStride;
+                int firstValueOffset = first * stride + components;
+                int secondValueOffset = second * stride + components;
+                int firstOutOffset = first * stride + components * 2;
+                int secondInOffset = second * stride;
 
                 for (int c = 0; c < components; c++)
                 {
@@ -394,24 +376,19 @@ namespace ULTRADROID.Models
                     }
 
                     float m0 = ReadValue(
-                        values, firstOutTangentOffset + c, 0f);
+                        values, firstOutOffset + c, 0f);
 
                     float m1 = ReadValue(
-                        values, secondInTangentOffset + c, 0f);
+                        values, secondInOffset + c, 0f);
 
                     float t2 = t * t;
                     float t3 = t2 * t;
 
-                    float h00 = 2f * t3 - 3f * t2 + 1f;
-                    float h10 = t3 - 2f * t2 + t;
-                    float h01 = -2f * t3 + 3f * t2;
-                    float h11 = t3 - t2;
-
                     result[c] =
-                        h00 * p0 +
-                        h10 * segmentDuration * m0 +
-                        h01 * p1 +
-                        h11 * segmentDuration * m1;
+                        (2f * t3 - 3f * t2 + 1f) * p0 +
+                        (t3 - 2f * t2 + t) * segmentDuration * m0 +
+                        (-2f * t3 + 3f * t2) * p1 +
+                        (t3 - t2) * segmentDuration * m1;
                 }
             }
             else
@@ -449,20 +426,16 @@ namespace ULTRADROID.Models
                 StringComparison.OrdinalIgnoreCase))
             {
                 if (value.Length >= 3)
-                {
-                    target.localPosition = new Vector3(
-                        value[0], value[1], value[2]);
-                }
+                    target.localPosition =
+                        new Vector3(value[0], value[1], value[2]);
             }
             else if (string.Equals(
                 path, "scale",
                 StringComparison.OrdinalIgnoreCase))
             {
                 if (value.Length >= 3)
-                {
-                    target.localScale = new Vector3(
-                        value[0], value[1], value[2]);
-                }
+                    target.localScale =
+                        new Vector3(value[0], value[1], value[2]);
             }
             else if (string.Equals(
                 path, "rotation",
@@ -501,9 +474,7 @@ namespace ULTRADROID.Models
             if (string.Equals(
                 path, "rotation",
                 StringComparison.OrdinalIgnoreCase))
-            {
                 return 4;
-            }
 
             if (string.Equals(
                 path, "translation",
@@ -511,9 +482,7 @@ namespace ULTRADROID.Models
                 string.Equals(
                 path, "scale",
                 StringComparison.OrdinalIgnoreCase))
-            {
                 return 3;
-            }
 
             return 1;
         }
@@ -554,7 +523,9 @@ namespace ULTRADROID.Models
             return duration;
         }
 
-        private static object GetMember(object instance, params string[] names)
+        private static object GetMember(
+            object instance,
+            params string[] names)
         {
             if (instance == null)
                 return null;
@@ -657,9 +628,7 @@ namespace ULTRADROID.Models
             if (values == null ||
                 index < 0 ||
                 index >= values.Length)
-            {
                 return fallback;
-            }
 
             return values[index];
         }
