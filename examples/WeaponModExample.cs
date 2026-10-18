@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -72,8 +71,13 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             return;
         }
 
+        // Apply the animation to the GLB node transforms first.
         if (_activeAnimation != null)
             UpdateAnimation(Time.deltaTime);
+
+        // Then deform any meshes registered for CPU skinning.
+        // This requires the updated ModelAPI that implements UpdateCpuSkinning.
+        ModelAPI.UpdateCpuSkinning(_modelRoot);
     }
 
     private static bool IsNonGameplayScene(string sceneName)
