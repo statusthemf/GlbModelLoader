@@ -44,13 +44,6 @@ jobs:
             fi
           done
 
-      - name: Check ULTRADROID dependencies
-        run: |
-          if [ ! -f "ULTRADROID.Core.dll" ]; then
-            echo "::error::Missing required dependency: ULTRADROID.Core.dll"
-            exit 1
-          fi
-
       - name: Verify example project exists
         run: |
           if [ ! -f "examples/ExampleMod.csproj" ]; then
@@ -78,14 +71,12 @@ jobs:
         run: |
           test -f bin/Release/net10.0/ULTRADROID.Models.dll
           test -f examples/bin/Release/net10.0/WeaponModExample.dll
-          test -f ULTRADROID.Core.dll
 
           echo "Build outputs:"
           ls -lh bin/Release/net10.0/ULTRADROID.Models.dll
           ls -lh examples/bin/Release/net10.0/WeaponModExample.dll
-          ls -lh ULTRADROID.Core.dll
 
-      - name: Upload plugins and dependencies
+      - name: Upload plugins
         uses: actions/upload-artifact@v4
         with:
           name: ULTRADROID-Plugins
@@ -93,4 +84,3 @@ jobs:
           path: |
             bin/Release/net10.0/ULTRADROID.Models.dll
             examples/bin/Release/net10.0/WeaponModExample.dll
-            ULTRADROID.Core.dll
