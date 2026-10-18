@@ -198,10 +198,11 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             }
             else
             {
+            
                 LogInfo(
-                    "Playing animation: " +
-                    _animationPlayer.CurrentAnimationName);
-            }
+                    "Animation '" + AnimationName +
+                    "' started successfully.");
+        }
 
             LogInfo("GLB model loaded successfully.");
         }
