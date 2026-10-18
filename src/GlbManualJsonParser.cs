@@ -663,21 +663,57 @@ namespace ULTRADROID.Models
                     {
                         name = Str(o, "name"),
                         mesh = Int(o, "mesh", -1),
+                        skin = Int(o, "skin", -1),
+
                         children = Ints(
                             Get(o, "children"),
                             "nodes.children"),
+
                         translation = Floats(
                             Get(o, "translation"),
                             "nodes.translation"),
+
                         rotation = Floats(
                             Get(o, "rotation"),
                             "nodes.rotation"),
+
                         scale = Floats(
                             Get(o, "scale"),
                             "nodes.scale"),
+
                         matrix = Floats(
                             Get(o, "matrix"),
                             "nodes.matrix")
+                    };
+                });
+
+            // Parse glTF skin definitions.
+            root.skins = Array(
+                Get(obj, "skins"),
+                "skins",
+                value =>
+                {
+                    var o = Obj(value);
+
+                    if (o == null)
+                    {
+                        throw new InvalidDataException(
+                            "Invalid skin entry.");
+                    }
+
+                    return new GltfSkin
+                    {
+                        name = Str(o, "name"),
+
+                        joints = Ints(
+                            Get(o, "joints"),
+                            "skins.joints"),
+
+                        skeleton = Int(
+                            o, "skeleton", -1),
+
+                        inverseBindMatrices = Int(
+                            o, "inverseBindMatrices", -1)
                     };
                 });
 
@@ -731,15 +767,25 @@ namespace ULTRADROID.Models
 
                                     attributes.TEXCOORD_0 =
                                         Int(attributeObject, "TEXCOORD_0", -1);
+
+                                    // Parse joint-index and weight accessors.
+                                    attributes.JOINTS_0 =
+                                        Int(attributeObject, "JOINTS_0", -1);
+
+                                    attributes.WEIGHTS_0 =
+                                        Int(attributeObject, "WEIGHTS_0", -1);
                                 }
 
                                 return new GltfPrimitive
                                 {
                                     attributes = attributes,
+
                                     indices = Int(
                                         primitive, "indices", -1),
+
                                     material = Int(
                                         primitive, "material", -1),
+
                                     mode = Int(
                                         primitive, "mode", 4)
                                 };
@@ -907,10 +953,7 @@ namespace ULTRADROID.Models
                     };
                 });
 
-            // -------------------------------------------------
-            // NEW: Parse animation clips, samplers and channels.
-            // -------------------------------------------------
-
+            // Parse animation clips, samplers and channels.
             root.animations = Array(
                 Get(obj, "animations"),
                 "animations",
