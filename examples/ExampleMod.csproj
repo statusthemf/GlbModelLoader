@@ -24,15 +24,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="ULTRADROID.API">
-      <HintPath>../ULTRADROID.API.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-
-    <Reference Include="ULTRADROID.Core">
-      <HintPath>../ULTRADROID.Core.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
 
     <Reference Include="Assembly-CSharp">
       <HintPath>../Assembly-CSharp.dll</HintPath>
