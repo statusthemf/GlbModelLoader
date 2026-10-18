@@ -9,11 +9,31 @@ namespace ULTRADROID.Models
 {
     public sealed class GlbAnimationPlayer
     {
+        private sealed class CachedTrack
+        {
+            public Transform Target;
+            public string Path;
+            public bool Cubic;
+            public bool Step;
+            public int Components;
+            public float[] Times;
+            public float[] Values;
+        }
+
         private readonly GameObject _root;
         private readonly GlbAnimationData[] _animations;
         private readonly Transform[] _nodeTransforms;
 
+        private readonly Dictionary<object, CachedTrack[]> _trackCache =
+            new Dictionary<object, CachedTrack[]>();
+
+        private readonly Dictionary<object, float> _durationCache =
+            new Dictionary<object, float>();
+
         private object _currentAnimation;
+        private CachedTrack[] _currentTracks;
+        private float[] _sampleBuffer = new float[4];
+        private float _currentDuration;
         private float _time;
         private bool _playing;
         private bool _paused;
@@ -44,7 +64,7 @@ namespace ULTRADROID.Models
 
         public float Duration
         {
-            get { return GetDuration(_currentAnimation); }
+            get { return _currentDuration; }
         }
 
         public float Time
@@ -62,6 +82,8 @@ namespace ULTRADROID.Models
             _nodeTransforms = nodeTransforms ?? new Transform[0];
 
             _currentAnimation = null;
+            _currentTracks = null;
+            _currentDuration = 0f;
             _time = 0f;
             _playing = false;
             _paused = false;
@@ -110,12 +132,37 @@ namespace ULTRADROID.Models
                 return false;
 
             _currentAnimation = animation;
+
+            if (!_trackCache.TryGetValue(animation, out _currentTracks))
+            {
+                _currentTracks = BuildTrackCache(animation);
+                _trackCache[animation] = _currentTracks;
+            }
+
+            if (!_durationCache.TryGetValue(
+                animation, out _currentDuration))
+            {
+                _currentDuration = CalculateDuration(_currentTracks);
+                _durationCache[animation] = _currentDuration;
+            }
+
+            int requiredComponents = 4;
+
+            for (int i = 0; i < _currentTracks.Length; i++)
+            {
+                if (_currentTracks[i].Components > requiredComponents)
+                    requiredComponents = _currentTracks[i].Components;
+            }
+
+            if (_sampleBuffer.Length < requiredComponents)
+                _sampleBuffer = new float[requiredComponents];
+
             _time = 0f;
             _playing = true;
             _paused = false;
             Loop = loop;
 
-            SampleAnimation(_time);
+            SampleAnimation(0f);
             UpdateSkinning();
 
             return true;
@@ -157,7 +204,7 @@ namespace ULTRADROID.Models
                 return;
             }
 
-            float duration = Duration;
+            float duration = _currentDuration;
 
             if (duration <= 0f)
             {
@@ -214,20 +261,19 @@ namespace ULTRADROID.Models
             }
         }
 
-        private void SampleAnimation(float time)
+        private CachedTrack[] BuildTrackCache(object animation)
         {
-            if (_currentAnimation == null)
-                return;
+            List<CachedTrack> result = new List<CachedTrack>();
 
             object tracksObject = GetMember(
-                _currentAnimation,
+                animation,
                 "Tracks", "tracks",
                 "Channels", "channels");
 
             IEnumerable tracks = tracksObject as IEnumerable;
 
             if (tracks == null)
-                return;
+                return result.ToArray();
 
             foreach (object track in tracks)
             {
@@ -282,46 +328,77 @@ namespace ULTRADROID.Models
                 if (components <= 0)
                     components = GetDefaultComponents(path);
 
-                SampleTrack(
-                    target,
-                    path,
-                    interpolation,
-                    times,
-                    values,
-                    components,
-                    time);
+                CachedTrack cached = new CachedTrack
+                {
+                    Target = target,
+                    Path = path,
+                    Cubic = string.Equals(
+                        interpolation,
+                        "CUBICSPLINE",
+                        StringComparison.OrdinalIgnoreCase),
+                    Step = string.Equals(
+                        interpolation,
+                        "STEP",
+                        StringComparison.OrdinalIgnoreCase),
+                    Components = components,
+                    Times = times,
+                    Values = values
+                };
+
+                result.Add(cached);
+            }
+
+            return result.ToArray();
+        }
+
+        private static float CalculateDuration(CachedTrack[] tracks)
+        {
+            float duration = 0f;
+
+            for (int i = 0; i < tracks.Length; i++)
+            {
+                float[] times = tracks[i].Times;
+
+                if (times != null && times.Length > 0)
+                {
+                    float last = times[times.Length - 1];
+
+                    if (last > duration)
+                        duration = last;
+                }
+            }
+
+            return duration;
+        }
+
+        private void SampleAnimation(float time)
+        {
+            if (_currentTracks == null)
+                return;
+
+            for (int i = 0; i < _currentTracks.Length; i++)
+            {
+                CachedTrack track = _currentTracks[i];
+
+                if (track.Target == null)
+                    continue;
+
+                SampleTrack(track, time);
             }
         }
 
-        private static void SampleTrack(
-            Transform target,
-            string path,
-            string interpolation,
-            float[] times,
-            float[] values,
-            int components,
-            float time)
+        private void SampleTrack(CachedTrack track, float time)
         {
-            if (target == null || times.Length == 0)
-                return;
-
-            bool cubic = string.Equals(
-                interpolation,
-                "CUBICSPLINE",
-                StringComparison.OrdinalIgnoreCase);
-
-            bool step = string.Equals(
-                interpolation,
-                "STEP",
-                StringComparison.OrdinalIgnoreCase);
+            float[] times = track.Times;
+            float[] values = track.Values;
 
             int keyCount = times.Length;
 
-            if (components <= 0)
-                components = GetDefaultComponents(path);
+            if (keyCount == 0)
+                return;
 
-            int first = 0;
-            int second = 0;
+            int first;
+            int second;
 
             if (time <= times[0])
             {
@@ -333,16 +410,25 @@ namespace ULTRADROID.Models
             }
             else
             {
-                for (int i = 0; i < keyCount - 1; i++)
+                // Binary search instead of scanning every keyframe.
+                int low = 0;
+                int high = keyCount - 1;
+
+                while (low + 1 < high)
                 {
-                    if (time >= times[i] && time <= times[i + 1])
-                    {
-                        first = i;
-                        second = i + 1;
-                        break;
-                    }
+                    int middle = low + (high - low) / 2;
+
+                    if (times[middle] <= time)
+                        low = middle;
+                    else
+                        high = middle;
                 }
+
+                first = low;
+                second = high;
             }
+
+            int components = track.Components;
 
             float segmentDuration = times[second] - times[first];
 
@@ -350,9 +436,9 @@ namespace ULTRADROID.Models
                 ? Mathf.Clamp01((time - times[first]) / segmentDuration)
                 : 0f;
 
-            float[] result = new float[components];
+            float[] result = _sampleBuffer;
 
-            if (cubic)
+            if (track.Cubic)
             {
                 int stride = components * 3;
 
@@ -360,6 +446,9 @@ namespace ULTRADROID.Models
                 int secondValueOffset = second * stride + components;
                 int firstOutOffset = first * stride + components * 2;
                 int secondInOffset = second * stride;
+
+                float t2 = t * t;
+                float t3 = t2 * t;
 
                 for (int c = 0; c < components; c++)
                 {
@@ -369,7 +458,7 @@ namespace ULTRADROID.Models
                     float p1 = ReadValue(
                         values, secondValueOffset + c, p0);
 
-                    if (step || first == second)
+                    if (track.Step || first == second)
                     {
                         result[c] = p0;
                         continue;
@@ -380,9 +469,6 @@ namespace ULTRADROID.Models
 
                     float m1 = ReadValue(
                         values, secondInOffset + c, 0f);
-
-                    float t2 = t * t;
-                    float t3 = t2 * t;
 
                     result[c] =
                         (2f * t3 - 3f * t2 + 1f) * p0 +
@@ -404,19 +490,20 @@ namespace ULTRADROID.Models
                     float b = ReadValue(
                         values, secondOffset + c, a);
 
-                    result[c] = step
+                    result[c] = track.Step
                         ? a
                         : Mathf.LerpUnclamped(a, b, t);
                 }
             }
 
-            ApplyValue(target, path, result);
+            ApplyValue(track.Target, track.Path, result, components);
         }
 
         private static void ApplyValue(
             Transform target,
             string path,
-            float[] value)
+            float[] value,
+            int length)
         {
             if (target == null || value == null)
                 return;
@@ -425,23 +512,27 @@ namespace ULTRADROID.Models
                 path, "translation",
                 StringComparison.OrdinalIgnoreCase))
             {
-                if (value.Length >= 3)
+                if (length >= 3)
+                {
                     target.localPosition =
                         new Vector3(value[0], value[1], value[2]);
+                }
             }
             else if (string.Equals(
                 path, "scale",
                 StringComparison.OrdinalIgnoreCase))
             {
-                if (value.Length >= 3)
+                if (length >= 3)
+                {
                     target.localScale =
                         new Vector3(value[0], value[1], value[2]);
+                }
             }
             else if (string.Equals(
                 path, "rotation",
                 StringComparison.OrdinalIgnoreCase))
             {
-                if (value.Length >= 4)
+                if (length >= 4)
                 {
                     Quaternion rotation = new Quaternion(
                         value[0], value[1], value[2], value[3]);
@@ -485,42 +576,6 @@ namespace ULTRADROID.Models
                 return 3;
 
             return 1;
-        }
-
-        private float GetDuration(object animation)
-        {
-            if (animation == null)
-                return 0f;
-
-            object tracksObject = GetMember(
-                animation,
-                "Tracks", "tracks",
-                "Channels", "channels");
-
-            IEnumerable tracks = tracksObject as IEnumerable;
-
-            if (tracks == null)
-                return 0f;
-
-            float duration = 0f;
-
-            foreach (object track in tracks)
-            {
-                float[] times = GetFloatArray(
-                    track,
-                    "Times", "times",
-                    "Input", "input");
-
-                if (times != null && times.Length > 0)
-                {
-                    float last = times[times.Length - 1];
-
-                    if (last > duration)
-                        duration = last;
-                }
-            }
-
-            return duration;
         }
 
         private static object GetMember(
