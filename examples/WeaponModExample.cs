@@ -5,15 +5,19 @@ using System.IO;
 using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
-using Il2CppInterop.Runtime.Injection;
+using ULTRADROID.API;
+using ULTRADROID.Models;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using ULTRADROID.Models;
+using UnityEngine.Events;
 
 [BepInPlugin(
     "ultradroid.bladesofchaos",
     "ULTRADROID Blades of Chaos",
-    "0.6.0")]
+    "0.8.0")]
+[BepInDependency(
+    ULTRADROIDControls.PluginGuid,
+    BepInDependency.DependencyFlags.HardDependency)]
 public sealed class BladesOfChaosPlugin : BasePlugin
 {
     public override void Load()
@@ -23,8 +27,7 @@ public sealed class BladesOfChaosPlugin : BasePlugin
         ClassInjector.RegisterTypeInIl2Cpp<BladesOfChaosRunner>();
         AddComponent<BladesOfChaosRunner>();
 
-        Log.LogInfo(
-            "ULTRADROID Blades of Chaos example loaded.");
+        Log.LogInfo("[Blades of Chaos] Animation tester loaded.");
     }
 }
 
@@ -32,19 +35,21 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 {
     internal static ManualLogSource PluginLog;
 
-    private const string ModelFileName =
-        "blades_of_chaos_god.glb";
-
-    private const string AnimationName = "Bow";
-
-    private const float LoadRetryInterval = 2f;
+    private const string ModelFileName = "blades_of_chaos_god.glb";
+    private const float RetryInterval = 2f;
 
     private GameObject _modelRoot;
-    private GlbAnimationPlayer _animationPlayer;
+    private GlbAnimationPlayer _player;
+    private GlbAnimationData[] _animations = new GlbAnimationData[0];
 
-    private string _lastSceneName = string.Empty;
-    private float _nextLoadAttempt;
-    private bool _loadErrorReported;
+    private readonly List<ButtonHandle> _buttons =
+        new List<ButtonHandle>();
+
+    private string _lastScene = "";
+    private float _nextRetry;
+    private bool _buttonsCreated;
+    private bool _loop = true;
+    private int _selectedIndex;
 
     public BladesOfChaosRunner(IntPtr ptr) : base(ptr)
     {
@@ -52,203 +57,286 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
     public void Update()
     {
-        string sceneName =
-            SceneManager.GetActiveScene().name;
+        string scene = SceneManager.GetActiveScene().name;
 
-        // Clean up when the active scene changes.
-        if (!string.Equals(
-            sceneName,
-            _lastSceneName,
-            StringComparison.Ordinal))
+        if (!string.Equals(scene, _lastScene, StringComparison.Ordinal))
         {
-            _lastSceneName = sceneName;
-
-            ClearLoadedModel();
-
-            _nextLoadAttempt = 0f;
-            _loadErrorReported = false;
+            _lastScene = scene;
+            ClearModel();
+            RemoveButtons();
+            _nextRetry = 0f;
         }
 
-        if (IsNonGameplayScene(sceneName))
+        if (IsMenu(scene))
             return;
 
-        // Retry until a model can be loaded.
-        if (_modelRoot == null)
+        if (_modelRoot == null && Time.unscaledTime >= _nextRetry)
         {
-            if (Time.unscaledTime >= _nextLoadAttempt)
-            {
-                _nextLoadAttempt =
-                    Time.unscaledTime + LoadRetryInterval;
-
-                TryLoadModel();
-            }
-
-            return;
+            _nextRetry = Time.unscaledTime + RetryInterval;
+            TryLoadModel();
         }
 
-        // GlbAnimationPlayer.Update() already updates CPU skinning.
-        if (_animationPlayer != null)
-        {
-            _animationPlayer.Update(Time.deltaTime);
-        }
-        else
-        {
-            // Preserve CPU skinning when no animation player exists.
+        if (_player != null)
+            _player.Update(Time.deltaTime);
+        else if (_modelRoot != null)
             ModelAPI.UpdateCpuSkinning(_modelRoot);
-        }
     }
 
-    private static bool IsNonGameplayScene(string sceneName)
+    private static bool IsMenu(string scene)
     {
-        if (string.IsNullOrEmpty(sceneName))
+        if (string.IsNullOrEmpty(scene))
             return true;
 
-        string scene = sceneName.ToLowerInvariant();
+        string name = scene.ToLowerInvariant();
 
-        return scene.Contains("bootstrap") ||
-               scene == "intro" ||
-               scene.Contains("mainmenu") ||
-               scene.Contains("main_menu") ||
-               scene.Contains("main menu") ||
-               scene.Contains("title") ||
-               scene.Contains("loading") ||
-               scene.Contains("credits") ||
-               scene.Contains("ending");
+        return name.Contains("bootstrap") ||
+               name == "intro" ||
+               name.Contains("main menu") ||
+               name.Contains("mainmenu") ||
+               name.Contains("title") ||
+               name.Contains("loading") ||
+               name.Contains("credits");
     }
 
     private void TryLoadModel()
     {
-        string modelPath = FindModelFile();
+        string path = FindModelFile();
 
-        if (string.IsNullOrEmpty(modelPath))
+        if (string.IsNullOrEmpty(path))
         {
-            ReportLoadProblem(
-                "Could not find " + ModelFileName +
-                ". Place it beside the plugin DLL, inside its " +
-                "assets folder, or in the supported plugin folders.");
-
+            LogWarning("Could not find " + ModelFileName);
             return;
         }
 
-        Camera camera = FindGameCamera();
+        Camera camera = Camera.main;
 
         if (camera == null)
         {
-            ReportLoadProblem(
-                "No active game camera was found. Will retry.");
+            Camera[] cameras = Camera.allCameras;
 
-            return;
+            for (int i = 0; cameras != null && i < cameras.Length; i++)
+            {
+                if (cameras[i] != null && cameras[i].isActiveAndEnabled)
+                {
+                    camera = cameras[i];
+                    break;
+                }
+            }
         }
 
-        GameObject loaded = null;
+        if (camera == null)
+            return;
 
         try
         {
+            _animations = ModelAPI.ReadGLBAnimations(path)
+                ?? new GlbAnimationData[0];
+
+            LogInfo("Animation clips found: " + _animations.Length);
+
+            for (int i = 0; i < _animations.Length; i++)
+            {
+                LogInfo(
+                    "Clip [" + i + "]: " +
+                    (_animations[i].Name ?? "(unnamed)"));
+            }
+
             ModelLoadOptions options = new ModelLoadOptions
             {
                 LoadTextures = true,
                 FlipUvV = true
             };
 
-            LogInfo("Loading GLB: " + modelPath);
-
-            loaded = ModelAPI.LoadGLB(
-                modelPath,
+            _modelRoot = ModelAPI.LoadGLB(
+                path,
                 camera.transform,
                 options);
 
-            if (loaded == null)
+            if (_modelRoot == null)
             {
-                ReportLoadProblem(
-                    "ModelAPI.LoadGLB returned null.");
-
+                LogWarning("ModelAPI.LoadGLB returned null.");
                 return;
             }
 
-            _modelRoot = loaded;
             _modelRoot.name = "ULTRADROID_BladesOfChaos";
+            _modelRoot.transform.localPosition = new Vector3(0f, 0f, 1f);
+            _modelRoot.transform.localRotation = Quaternion.identity;
+            _modelRoot.transform.localScale = new Vector3(0.1f, 0.1f, 0.1f);
 
-            // Camera-attached preview placement.
-            _modelRoot.transform.localPosition =
-                new Vector3(0f, 0f, 1f);
+            _player = ModelAPI.GetAnimationPlayer(_modelRoot);
 
-            _modelRoot.transform.localRotation =
-                Quaternion.identity;
-
-            _modelRoot.transform.localScale =
-                new Vector3(0.1f, 0.1f, 0.1f);
-
-            // Retrieve the animation player registered by LoadGLB.
-            _animationPlayer =
-                ModelAPI.GetAnimationPlayer(_modelRoot);
-
-            if (_animationPlayer == null)
+            if (_player == null)
             {
-                LogWarning(
-                    "The model loaded, but no animation player " +
-                    "was registered. The model will remain visible.");
-
-                LogInfo("GLB model loaded successfully.");
+                LogWarning("Model loaded, but no animation player was registered.");
                 return;
             }
 
-            if (!_animationPlayer.Play(AnimationName, true))
-            {
-                LogWarning(
-                    "The model loaded, but animation '" +
-                    AnimationName +
-                    "' could not be started. Check the animation name.");
+            _selectedIndex = FindPreferredClip("Bow");
+            _player.PlaybackSpeed = 1f;
+            _loop = true;
 
-                LogInfo(
-                    "Animation player was created successfully.");
-            }
-            else
-            {
-                LogInfo(
-                    "Animation '" + AnimationName +
-                    "' started successfully.");
-            }
+            if (_animations.Length > 0)
+                PlaySelected();
 
-            LogInfo("GLB model loaded successfully.");
+            CreateButtons();
+
+            LogInfo("Model and animation player initialized.");
         }
         catch (Exception ex)
         {
-            LogError(
-                "Failed to load or initialize the GLB model: " + ex);
+            LogError("Initialization failed: " + ex);
 
-            // Avoid leaving a partially initialized model behind.
-            if (loaded != null)
-                UnityEngine.Object.Destroy(loaded);
-
-            _modelRoot = null;
-            _animationPlayer = null;
+            ClearModel();
+            RemoveButtons();
         }
     }
 
-    private static Camera FindGameCamera()
+    private int FindPreferredClip(string preferred)
     {
-        Camera main = Camera.main;
-
-        if (main != null && main.isActiveAndEnabled)
-            return main;
-
-        Camera[] cameras = Camera.allCameras;
-
-        if (cameras == null)
-            return null;
-
-        for (int i = 0; i < cameras.Length; i++)
+        for (int i = 0; i < _animations.Length; i++)
         {
-            Camera candidate = cameras[i];
-
-            if (candidate != null &&
-                candidate.isActiveAndEnabled)
-            {
-                return candidate;
-            }
+            if (string.Equals(
+                _animations[i].Name,
+                preferred,
+                StringComparison.OrdinalIgnoreCase))
+                return i;
         }
 
-        return null;
+        return 0;
+    }
+
+    private void CreateButtons()
+    {
+        if (_buttonsCreated)
+            return;
+
+        _buttonsCreated = true;
+
+        // Small row placed near the bottom-right area.
+        // PositionOffset follows the coordinate convention of Controls API.
+        AddControl("Prev", -250f, 100f, PreviousAnimation);
+        AddControl("Play", -150f, 100f, PlaySelected);
+        AddControl("Pause", -50f, 100f, PauseAnimation);
+        AddControl("Stop", 50f, 100f, StopAnimation);
+        AddControl("Next", 150f, 100f, NextAnimation);
+        AddControl("1.0x", 250f, 100f, ChangeSpeed);
+        AddControl("Loop", 150f, 190f, ToggleLoop);
+    }
+
+    private void AddControl(
+        string label,
+        float x,
+        float y,
+        Action callback)
+    {
+        ButtonHandle handle = ULTRADROIDControls.AddButton(
+            new ButtonConfig
+            {
+                Id = "ULTRADROID.Blades.Animation." + label,
+                Label = label,
+                PositionOffset = new Vector2(x, y),
+                ApplyTint = false,
+                ScaleMultiplier = 0.65f,
+                OnClick = callback
+            });
+
+        if (handle != null)
+            _buttons.Add(handle);
+
+        LogInfo("Requested control: " + label);
+    }
+
+    private void PlaySelected()
+    {
+        if (_player == null || _animations.Length == 0)
+            return;
+
+        if (_selectedIndex < 0 || _selectedIndex >= _animations.Length)
+            _selectedIndex = 0;
+
+        bool success = _player.Play(_selectedIndex, _loop);
+
+        LogInfo(
+            success
+                ? "Playing: " + _animations[_selectedIndex].Name
+                : "Could not play selected animation.");
+    }
+
+    private void PauseAnimation()
+    {
+        if (_player == null)
+            return;
+
+        if (_player.IsPaused)
+        {
+            _player.Resume();
+            LogInfo("Resumed animation.");
+        }
+        else if (_player.IsPlaying)
+        {
+            _player.Pause();
+            LogInfo("Paused animation.");
+        }
+        else
+        {
+            LogInfo("Animation is stopped. Tap Play to start.");
+        }
+    }
+
+    private void StopAnimation()
+    {
+        if (_player == null)
+            return;
+
+        _player.Stop();
+        LogInfo("Stopped: " + _player.CurrentAnimationName);
+    }
+
+    private void PreviousAnimation()
+    {
+        SelectRelative(-1);
+    }
+
+    private void NextAnimation()
+    {
+        SelectRelative(1);
+    }
+
+    private void SelectRelative(int direction)
+    {
+        if (_animations.Length == 0)
+            return;
+
+        _selectedIndex =
+            (_selectedIndex + direction + _animations.Length)
+            % _animations.Length;
+
+        PlaySelected();
+    }
+
+    private void ChangeSpeed()
+    {
+        if (_player == null)
+            return;
+
+        float speed = _player.PlaybackSpeed + 0.25f;
+
+        if (speed > 2f)
+            speed = 0.25f;
+
+        _player.PlaybackSpeed = speed;
+
+        LogInfo("Playback speed: " + speed.ToString("0.00") + "x");
+    }
+
+    private void ToggleLoop()
+    {
+        _loop = !_loop;
+
+        if (_player != null)
+            _player.Loop = _loop;
+
+        LogInfo("Loop: " + (_loop ? "ON" : "OFF"));
     }
 
     private static string FindModelFile()
@@ -257,58 +345,27 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         try
         {
-            string assemblyDirectory =
-                Path.GetDirectoryName(
-                    typeof(BladesOfChaosPlugin)
-                        .Assembly.Location);
+            string directory = Path.GetDirectoryName(
+                typeof(BladesOfChaosPlugin).Assembly.Location);
 
-            if (!string.IsNullOrEmpty(assemblyDirectory))
+            if (!string.IsNullOrEmpty(directory))
             {
-                candidates.Add(
-                    Path.Combine(
-                        assemblyDirectory,
-                        ModelFileName));
-
-                candidates.Add(
-                    Path.Combine(
-                        assemblyDirectory,
-                        "assets",
-                        ModelFileName));
-
-                candidates.Add(
-                    Path.Combine(
-                        assemblyDirectory,
-                        "Assets",
-                        ModelFileName));
+                candidates.Add(Path.Combine(directory, ModelFileName));
+                candidates.Add(Path.Combine(directory, "Assets", ModelFileName));
+                candidates.Add(Path.Combine(directory, "assets", ModelFileName));
             }
         }
         catch
         {
-            // Continue checking plugin directories.
         }
 
         try
         {
-            candidates.Add(
-                Path.Combine(
-                    Paths.PluginPath,
-                    ModelFileName));
-
-            candidates.Add(
-                Path.Combine(
-                    Paths.PluginPath,
-                    "BladesOfChaos",
-                    ModelFileName));
-
-            candidates.Add(
-                Path.Combine(
-                    Paths.PluginPath,
-                    "ULTRADROID.BladesOfChaos",
-                    ModelFileName));
+            candidates.Add(Path.Combine(Paths.PluginPath, ModelFileName));
+            candidates.Add(Path.Combine(Paths.PluginPath, "BladesOfChaos", ModelFileName));
         }
         catch
         {
-            // Other candidate locations may still work.
         }
 
         for (int i = 0; i < candidates.Count; i++)
@@ -320,54 +377,60 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             }
             catch
             {
-                // Try the next candidate.
             }
         }
 
         return null;
     }
 
-    private void ReportLoadProblem(string message)
+    private void RemoveButtons()
     {
-        if (_loadErrorReported)
-            return;
+        for (int i = 0; i < _buttons.Count; i++)
+        {
+            try
+            {
+                _buttons[i]?.Dispose();
+            }
+            catch
+            {
+            }
+        }
 
-        _loadErrorReported = true;
-        LogWarning(message);
+        _buttons.Clear();
+        _buttonsCreated = false;
     }
 
-    private void ClearLoadedModel()
+    private void ClearModel()
     {
         if (_modelRoot != null)
             UnityEngine.Object.Destroy(_modelRoot);
 
         _modelRoot = null;
-        _animationPlayer = null;
+        _player = null;
+        _animations = new GlbAnimationData[0];
     }
 
     public void OnDestroy()
     {
-        ClearLoadedModel();
+        RemoveButtons();
+        ClearModel();
     }
 
     private static void LogInfo(string message)
     {
         if (PluginLog != null)
-            PluginLog.LogInfo(
-                "[Blades of Chaos] " + message);
+            PluginLog.LogInfo("[Blades of Chaos] " + message);
     }
 
     private static void LogWarning(string message)
     {
         if (PluginLog != null)
-            PluginLog.LogWarning(
-                "[Blades of Chaos] " + message);
+            PluginLog.LogWarning("[Blades of Chaos] " + message);
     }
 
     private static void LogError(string message)
     {
         if (PluginLog != null)
-            PluginLog.LogError(
-                "[Blades of Chaos] " + message);
+            PluginLog.LogError("[Blades of Chaos] " + message);
     }
 }
