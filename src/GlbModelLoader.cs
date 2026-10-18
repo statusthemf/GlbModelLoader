@@ -45,6 +45,28 @@ namespace ULTRADROID.Models
     {
         public const string Version = "0.1.17-skinning";
 
+        private sealed class CpuSkinningEntry
+        {
+            public GameObject ModelRoot;
+            public Transform MeshTransform;
+            public Mesh Mesh;
+
+            public Vector3[] OriginalVertices;
+            public Vector3[] OriginalNormals;
+
+            public Transform[] Bones;
+            public Matrix4x4[] BindPoses;
+
+            public byte[] BonesPerVertex;
+            public GlbBoneWeight1[] Weights;
+
+            public Matrix4x4[] SkinMatrices;
+            public Vector3[] DeformedVertices;
+        }
+
+        private static readonly List<CpuSkinningEntry>
+            CpuSkinningEntries = new List<CpuSkinningEntry>();
+
         internal static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
                 "ULTRADROID Models API");
@@ -478,7 +500,8 @@ namespace ULTRADROID.Models
                     materials,
                     options,
                     node.skin,
-                    nodeTransforms);
+                    nodeTransforms,
+                    root.gameObject);
             }
         }
 
@@ -719,6 +742,190 @@ namespace ULTRADROID.Models
         }
 
         // ------------------------------------------------------------
+        // CPU SKINNING FALLBACK
+        // ------------------------------------------------------------
+
+        private static void RegisterCpuSkinning(
+            GameObject modelRoot,
+            Transform meshTransform,
+            Mesh mesh,
+            Vector3[] originalVertices,
+            Vector3[] originalNormals,
+            Transform[] bones,
+            Matrix4x4[] bindPoses,
+            List<byte> bonesPerVertex,
+            List<GlbBoneWeight1> allBoneWeights)
+        {
+            if (modelRoot == null ||
+                meshTransform == null ||
+                mesh == null ||
+                originalVertices == null ||
+                bones == null ||
+                bindPoses == null ||
+                bonesPerVertex == null ||
+                allBoneWeights == null)
+            {
+                throw new ArgumentNullException(
+                    "CPU skinning received missing data.");
+            }
+
+            if (bonesPerVertex.Count != originalVertices.Length)
+            {
+                throw new InvalidDataException(
+                    "CPU skinning vertex count mismatch.");
+            }
+
+            int expectedWeights = 0;
+
+            foreach (byte count in bonesPerVertex)
+                expectedWeights += count;
+
+            if (expectedWeights != allBoneWeights.Count)
+            {
+                throw new InvalidDataException(
+                    "CPU skinning weight count mismatch.");
+            }
+
+            CpuSkinningEntry entry = new CpuSkinningEntry
+            {
+                ModelRoot = modelRoot,
+                MeshTransform = meshTransform,
+                Mesh = mesh,
+
+                OriginalVertices = (Vector3[])originalVertices.Clone(),
+
+                OriginalNormals = originalNormals == null
+                    ? null
+                    : (Vector3[])originalNormals.Clone(),
+
+                Bones = (Transform[])bones.Clone(),
+                BindPoses = (Matrix4x4[])bindPoses.Clone(),
+
+                BonesPerVertex = bonesPerVertex.ToArray(),
+                Weights = allBoneWeights.ToArray(),
+
+                SkinMatrices = new Matrix4x4[bones.Length],
+                DeformedVertices = new Vector3[originalVertices.Length]
+            };
+
+            CpuSkinningEntries.Add(entry);
+
+            DiagnosticLog.LogInfo(
+                "[ULTRADROID Models] CPU skinning registered: " +
+                mesh.name +
+                ", vertices=" + originalVertices.Length +
+                ", bones=" + bones.Length +
+                ", weights=" + allBoneWeights.Count);
+        }
+
+        public static void UpdateCpuSkinning(GameObject modelRoot)
+        {
+            if (modelRoot == null)
+                return;
+
+            for (int e = CpuSkinningEntries.Count - 1; e >= 0; e--)
+            {
+                CpuSkinningEntry entry = CpuSkinningEntries[e];
+
+                if (entry.ModelRoot == null ||
+                    entry.Mesh == null ||
+                    entry.MeshTransform == null)
+                {
+                    CpuSkinningEntries.RemoveAt(e);
+                    continue;
+                }
+
+                if (entry.ModelRoot != modelRoot)
+                    continue;
+
+                try
+                {
+                    UpdateCpuSkinningEntry(entry);
+                }
+                catch (Exception ex)
+                {
+                    LogError(
+                        "CPU skinning update failed for '" +
+                        entry.Mesh.name + "'.",
+                        ex);
+
+                    CpuSkinningEntries.RemoveAt(e);
+                }
+            }
+        }
+
+        private static void UpdateCpuSkinningEntry(
+            CpuSkinningEntry entry)
+        {
+            Transform meshTransform = entry.MeshTransform;
+
+            Matrix4x4 worldToMesh =
+                meshTransform.worldToLocalMatrix;
+
+            for (int b = 0; b < entry.Bones.Length; b++)
+            {
+                Transform bone = entry.Bones[b];
+
+                if (bone == null)
+                    throw new InvalidOperationException(
+                        "CPU skinning encountered a missing bone.");
+
+                entry.SkinMatrices[b] =
+                    worldToMesh *
+                    bone.localToWorldMatrix *
+                    entry.BindPoses[b];
+            }
+
+            int weightIndex = 0;
+
+            for (int v = 0; v < entry.OriginalVertices.Length; v++)
+            {
+                Vector3 original = entry.OriginalVertices[v];
+                Vector3 result = Vector3.zero;
+
+                int influenceCount = entry.BonesPerVertex[v];
+                float totalWeight = 0f;
+
+                for (int j = 0; j < influenceCount; j++)
+                {
+                    GlbBoneWeight1 weight =
+                        entry.Weights[weightIndex++];
+
+                    if (weight.boneIndex < 0 ||
+                        weight.boneIndex >= entry.SkinMatrices.Length)
+                    {
+                        throw new InvalidDataException(
+                            "CPU skinning bone index is invalid.");
+                    }
+
+                    if (weight.weight <= 0f)
+                        continue;
+
+                    Vector3 transformed =
+                        entry.SkinMatrices[weight.boneIndex]
+                            .MultiplyPoint3x4(original);
+
+                    result += transformed * weight.weight;
+                    totalWeight += weight.weight;
+                }
+
+                if (totalWeight > 0.000001f)
+                    entry.DeformedVertices[v] = result / totalWeight;
+                else
+                    entry.DeformedVertices[v] = original;
+            }
+
+            entry.Mesh.vertices = entry.DeformedVertices;
+
+            // Keep the mesh's visible bounds up to date as it deforms.
+            entry.Mesh.RecalculateBounds();
+
+            // Recalculate normals so lighting follows the deformation.
+            // This can be expensive on large meshes.
+            entry.Mesh.RecalculateNormals();
+        }
+
+        // ------------------------------------------------------------
         // MESH BUILDING, INCLUDING SKINNED MESHES
         // ------------------------------------------------------------
 
@@ -729,7 +936,8 @@ namespace ULTRADROID.Models
             Material[] materials,
             ModelLoadOptions options,
             int skinIndex,
-            Transform[] nodeTransforms)
+            Transform[] nodeTransforms,
+            GameObject modelRoot)
         {
             if (source.primitives == null ||
                 source.primitives.Length == 0)
@@ -1047,6 +1255,17 @@ namespace ULTRADROID.Models
                 hasBoneWeights &&
                 bonesPerVertex.Count == vertices.Count;
 
+            Matrix4x4[] bindPoses = null;
+
+            if (skinDataReady)
+            {
+                bindPoses = BuildBindPoses(
+                    doc,
+                    skin,
+                    bones,
+                    gameObject.transform);
+            }
+
             bool skinWeightsApplied = false;
 
             if (skinDataReady)
@@ -1064,7 +1283,7 @@ namespace ULTRADROID.Models
                 {
                     LogError(
                         "Native bone-weight assignment failed. " +
-                        "Falling back to a static mesh for '" +
+                        "Using CPU skinning for '" +
                         gameObject.name + "'.",
                         ex);
                 }
@@ -1072,10 +1291,6 @@ namespace ULTRADROID.Models
 
             if (skinWeightsApplied)
             {
-                Matrix4x4[] bindPoses =
-                    BuildBindPoses(
-                        doc, skin, bones, gameObject.transform);
-
                 mesh.bindposes =
                     new Il2CppStructArray<Matrix4x4>(bindPoses);
 
@@ -1105,15 +1320,6 @@ namespace ULTRADROID.Models
             }
             else
             {
-                if (skinned && !skinDataReady)
-                {
-                    LogError(
-                        "Node '" + gameObject.name +
-                        "' has a skin but valid JOINTS_0/WEIGHTS_0 " +
-                        "data is unavailable. Loading as a static mesh.",
-                        null);
-                }
-
                 mesh.RecalculateBounds();
 
                 MeshFilter filter =
@@ -1127,6 +1333,30 @@ namespace ULTRADROID.Models
                 renderer.sharedMaterials =
                     new Il2CppReferenceArray<Material>(
                         submeshMaterials.ToArray());
+
+                if (skinned && skinDataReady)
+                {
+                    RegisterCpuSkinning(
+                        modelRoot,
+                        gameObject.transform,
+                        mesh,
+                        vertices.ToArray(),
+                        hasNormals && normals.Count == vertices.Count
+                            ? normals.ToArray()
+                            : null,
+                        bones,
+                        bindPoses,
+                        bonesPerVertex,
+                        allBoneWeights);
+                }
+                else if (skinned)
+                {
+                    LogError(
+                        "CPU skinning unavailable because valid " +
+                        "JOINTS_0/WEIGHTS_0 data is missing for '" +
+                        gameObject.name + "'.",
+                        null);
+                }
 
                 if (options.CreateColliders)
                 {
