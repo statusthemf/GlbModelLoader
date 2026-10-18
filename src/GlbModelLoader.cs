@@ -88,18 +88,10 @@ namespace ULTRADROID.Models
                 throw new FileNotFoundException(
                     "GLB file was not found.", path);
 
-            try
-            {
-                GlbDocument doc =
-                    GlbDocument.Parse(File.ReadAllBytes(path));
+            GlbDocument doc =
+                GlbDocument.Parse(File.ReadAllBytes(path));
 
-                return doc.ReadAnimations();
-            }
-            catch (Exception ex)
-            {
-                LogError("Failed to read GLB animations.", ex);
-                throw;
-            }
+            return doc.ReadAnimations();
         }
 
         public static GameObject LoadGLB(
@@ -117,17 +109,8 @@ namespace ULTRADROID.Models
 
             options = options ?? new ModelLoadOptions();
 
-            GlbDocument doc;
-
-            try
-            {
-                doc = GlbDocument.Parse(File.ReadAllBytes(path));
-            }
-            catch (Exception ex)
-            {
-                LogError("GLB parsing failed.", ex);
-                throw;
-            }
+            GlbDocument doc =
+                GlbDocument.Parse(File.ReadAllBytes(path));
 
             if (doc == null || doc.json == null)
                 throw new InvalidDataException(
@@ -809,13 +792,6 @@ namespace ULTRADROID.Models
             };
 
             CpuSkinningEntries.Add(entry);
-
-            DiagnosticLog.LogInfo(
-                "[ULTRADROID Models] CPU skinning registered: " +
-                mesh.name +
-                ", vertices=" + originalVertices.Length +
-                ", bones=" + bones.Length +
-                ", weights=" + allBoneWeights.Count);
         }
 
         public static void UpdateCpuSkinning(GameObject modelRoot)
@@ -1496,18 +1472,7 @@ namespace ULTRADROID.Models
                 Encoding.UTF8.GetString(jsonBytes)
                     .TrimEnd('\0', ' ', '\r', '\n', '\t');
 
-            GltfRoot root;
-
-            try
-            {
-                root = GlbManualJsonParser.ParseRoot(jsonText);
-            }
-            catch (Exception ex)
-            {
-                ModelAPI.DiagnosticLog.LogError(
-                    "[ULTRADROID Models] Manual JSON parsing failed\n" + ex);
-                throw;
-            }
+            GltfRoot root = GlbManualJsonParser.ParseRoot(jsonText);
 
             if (root == null)
                 throw new InvalidDataException(
