@@ -475,8 +475,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         return null;
     }
 
-    // Animation diagnostics: reports whether time advances and
-    // how many tracks are successfully applied.
+    // Detailed animation diagnostics.
+    // Logs sampled values and the actual Unity transform values
+    // for the first five animation tracks.
     private void UpdateAnimation(float deltaTime)
     {
         if (_activeAnimation == null ||
@@ -492,21 +493,23 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         if (duration <= 0f)
         {
-            LogWarning("ANIM DEBUG: animation duration is zero.");
+            LogWarning("ANIM DETAIL: animation duration is zero.");
             return;
         }
 
         _animationTime += Mathf.Max(0f, deltaTime);
         float time = _animationTime % duration;
 
-        int total = _activeAnimation.Tracks.Length;
+        GlbAnimationTrack[] tracks = _activeAnimation.Tracks;
+
         int applied = 0;
-        int missingNode = 0;
+        int missing = 0;
+        int badSamples = 0;
         int unsupported = 0;
-        int badSample = 0;
         int unknownPath = 0;
 
-        GlbAnimationTrack[] tracks = _activeAnimation.Tracks;
+        StringBuilder details = new StringBuilder();
+        int detailCount = Mathf.Min(5, tracks.Length);
 
         for (int i = 0; i < tracks.Length; i++)
         {
@@ -521,22 +524,27 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                     track.TargetNode, out target) ||
                 target == null)
             {
-                missingNode++;
+                missing++;
+
+                if (i < detailCount)
+                {
+                    details.Append(
+                        "\nTRACK " + i +
+                        ": node=" + track.TargetNode +
+                        ", path=" + track.Path +
+                        ", TARGET MISSING");
+                }
+
                 continue;
             }
 
             string path = track.Path;
 
-            if (path == "weights")
-            {
-                unsupported++;
-                continue;
-            }
-
-            if (string.Equals(
-                track.Interpolation,
-                "CUBICSPLINE",
-                StringComparison.OrdinalIgnoreCase))
+            if (path == "weights" ||
+                string.Equals(
+                    track.Interpolation,
+                    "CUBICSPLINE",
+                    StringComparison.OrdinalIgnoreCase))
             {
                 unsupported++;
                 continue;
@@ -558,7 +566,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
             if (!TrySample(track, time, components, values))
             {
-                badSample++;
+                badSamples++;
                 continue;
             }
 
@@ -583,6 +591,60 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             }
 
             applied++;
+
+            if (i < detailCount)
+            {
+                details.Append(
+                    "\nTRACK " + i +
+                    ": node=" + track.TargetNode +
+                    ", path=" + path +
+                    ", interpolation=" + track.Interpolation +
+                    ", targetName=" + target.name +
+                    ", targetID=" + target.GetInstanceID() +
+                    ", sampled=[");
+
+                for (int c = 0; c < components; c++)
+                {
+                    if (c > 0)
+                        details.Append(", ");
+
+                    details.Append(values[c].ToString("F3"));
+                }
+
+                details.Append("]");
+
+                if (path == "translation")
+                {
+                    Vector3 p = target.localPosition;
+
+                    details.Append(
+                        ", actualPosition=[" +
+                        p.x.ToString("F3") + ", " +
+                        p.y.ToString("F3") + ", " +
+                        p.z.ToString("F3") + "]");
+                }
+                else if (path == "scale")
+                {
+                    Vector3 s = target.localScale;
+
+                    details.Append(
+                        ", actualScale=[" +
+                        s.x.ToString("F3") + ", " +
+                        s.y.ToString("F3") + ", " +
+                        s.z.ToString("F3") + "]");
+                }
+                else if (path == "rotation")
+                {
+                    Quaternion r = target.localRotation;
+
+                    details.Append(
+                        ", actualRotation=[" +
+                        r.x.ToString("F3") + ", " +
+                        r.y.ToString("F3") + ", " +
+                        r.z.ToString("F3") + ", " +
+                        r.w.ToString("F3") + "]");
+                }
+            }
         }
 
         if (Time.unscaledTime >= _nextAnimationDebugLog)
@@ -590,14 +652,15 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             _nextAnimationDebugLog = Time.unscaledTime + 2f;
 
             LogInfo(
-                "ANIM DEBUG: time=" + time.ToString("F2") +
+                "ANIM DETAIL: time=" + time.ToString("F2") +
                 "/" + duration.ToString("F2") +
-                ", tracks=" + total +
+                ", tracks=" + tracks.Length +
                 ", applied=" + applied +
-                ", missingNodes=" + missingNode +
-                ", badSamples=" + badSample +
+                ", missing=" + missing +
+                ", badSamples=" + badSamples +
                 ", unsupported=" + unsupported +
-                ", unknownPaths=" + unknownPath);
+                ", unknownPaths=" + unknownPath +
+                details.ToString());
         }
     }
 
