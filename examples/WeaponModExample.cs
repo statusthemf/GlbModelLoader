@@ -16,15 +16,15 @@ public sealed class BladesOfChaosPlugin : BasePlugin
     public override void Load()
     {
         BladesOfChaosRunner.PluginLog = Log;
+
         ClassInjector.RegisterTypeInIl2Cpp<BladesOfChaosRunner>();
         AddComponent<BladesOfChaosRunner>();
-        Log.LogInfo("[Blades of Chaos] Plugin 0.5.4 diagnostic loaded.");
     }
 }
 
 public sealed class BladesOfChaosRunner : MonoBehaviour
 {
-    public static ManualLogSource PluginLog;
+    internal static ManualLogSource PluginLog;
 
     private const string ModelFileName = "blades_of_chaos_god.glb";
     private const string PreferredAnimationName = "Bow";
@@ -34,7 +34,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     private string _lastSceneName = "";
     private float _nextLoadAttempt;
     private float _animationTime;
-    private float _nextAnimationDebugLog;
+
     private GlbAnimationData _activeAnimation;
 
     private readonly Dictionary<int, Transform> _nodeTransforms =
@@ -43,18 +43,23 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     private readonly HashSet<Transform> _mappedTransforms =
         new HashSet<Transform>();
 
-    public BladesOfChaosRunner(IntPtr ptr) : base(ptr) { }
+    public BladesOfChaosRunner(IntPtr ptr) : base(ptr)
+    {
+    }
 
     public void Update()
     {
         string sceneName = SceneManager.GetActiveScene().name;
 
-        if (!string.Equals(sceneName, _lastSceneName, StringComparison.Ordinal))
+        if (!string.Equals(
+            sceneName,
+            _lastSceneName,
+            StringComparison.Ordinal))
         {
             _lastSceneName = sceneName;
+
             ClearLoadedModel();
             _nextLoadAttempt = 0f;
-            LogInfo("Scene changed to: " + sceneName);
         }
 
         if (IsNonGameplayScene(sceneName))
@@ -71,12 +76,11 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             return;
         }
 
-        // Apply the animation to the GLB node transforms first.
+        // Update the GLB node transforms first.
         if (_activeAnimation != null)
             UpdateAnimation(Time.deltaTime);
 
-        // Then deform any meshes registered for CPU skinning.
-        // This requires the updated ModelAPI that implements UpdateCpuSkinning.
+        // Update meshes that use the Models API CPU-skinning fallback.
         ModelAPI.UpdateCpuSkinning(_modelRoot);
     }
 
@@ -85,17 +89,17 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         if (string.IsNullOrEmpty(sceneName))
             return true;
 
-        string s = sceneName.ToLowerInvariant();
+        string scene = sceneName.ToLowerInvariant();
 
-        return s.Contains("bootstrap") ||
-               s == "intro" ||
-               s.Contains("mainmenu") ||
-               s.Contains("main_menu") ||
-               s.Contains("main menu") ||
-               s.Contains("title") ||
-               s.Contains("loading") ||
-               s.Contains("credits") ||
-               s.Contains("ending");
+        return scene.Contains("bootstrap") ||
+               scene == "intro" ||
+               scene.Contains("mainmenu") ||
+               scene.Contains("main_menu") ||
+               scene.Contains("main menu") ||
+               scene.Contains("title") ||
+               scene.Contains("loading") ||
+               scene.Contains("credits") ||
+               scene.Contains("ending");
     }
 
     private void TryLoadModel()
@@ -108,19 +112,15 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             {
                 LogWarning(
                     "Could not find " + ModelFileName +
-                    ". Put it beside the plugin DLL or in the plugin folder.");
+                    ". Place it beside the plugin DLL or in a plugin folder.");
+
                 return;
             }
 
             Camera camera = FindGameCamera();
 
             if (camera == null)
-            {
-                LogInfo("Waiting for the gameplay camera...");
                 return;
-            }
-
-            LogInfo("Loading model from: " + _modelPath);
 
             ModelLoadOptions options = new ModelLoadOptions
             {
@@ -145,28 +145,15 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             _modelRoot.transform.localPosition =
                 new Vector3(0f, 0f, 1f);
 
-            _modelRoot.transform.localRotation = Quaternion.identity;
+            _modelRoot.transform.localRotation =
+                Quaternion.identity;
 
             _modelRoot.transform.localScale =
                 new Vector3(0.1f, 0.1f, 0.1f);
 
             LoadAnimationDataAndMapNodes();
 
-            LogInfo(
-                "Model loaded. Mapped glTF nodes: " +
-                _nodeTransforms.Count);
-
-            LogSkinningDiagnostics();
-            LogMappedHierarchyDiagnostics();
-
-            if (_activeAnimation != null)
-            {
-                LogInfo(
-                    "Playing animation: " + _activeAnimation.Name +
-                    " (" + _activeAnimation.Duration +
-                    " seconds, looping).");
-            }
-            else
+            if (_activeAnimation == null)
             {
                 LogWarning(
                     "No usable animation clip was found. " +
@@ -189,15 +176,15 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         Camera[] cameras = Camera.allCameras;
 
-        if (cameras != null)
-        {
-            for (int i = 0; i < cameras.Length; i++)
-            {
-                Camera candidate = cameras[i];
+        if (cameras == null)
+            return null;
 
-                if (candidate != null && candidate.isActiveAndEnabled)
-                    return candidate;
-            }
+        for (int i = 0; i < cameras.Length; i++)
+        {
+            Camera candidate = cameras[i];
+
+            if (candidate != null && candidate.isActiveAndEnabled)
+                return candidate;
         }
 
         return null;
@@ -215,30 +202,48 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
             if (!string.IsNullOrEmpty(assemblyDirectory))
             {
-                candidates.Add(Path.Combine(
-                    assemblyDirectory, ModelFileName));
+                candidates.Add(
+                    Path.Combine(assemblyDirectory, ModelFileName));
 
-                candidates.Add(Path.Combine(
-                    assemblyDirectory, "assets", ModelFileName));
+                candidates.Add(
+                    Path.Combine(
+                        assemblyDirectory,
+                        "assets",
+                        ModelFileName));
 
-                candidates.Add(Path.Combine(
-                    assemblyDirectory, "Assets", ModelFileName));
+                candidates.Add(
+                    Path.Combine(
+                        assemblyDirectory,
+                        "Assets",
+                        ModelFileName));
             }
         }
-        catch { }
+        catch
+        {
+            // Continue checking the other supported locations.
+        }
 
         try
         {
-            candidates.Add(Path.Combine(
-                Paths.PluginPath, ModelFileName));
+            candidates.Add(
+                Path.Combine(Paths.PluginPath, ModelFileName));
 
-            candidates.Add(Path.Combine(
-                Paths.PluginPath, "BladesOfChaos", ModelFileName));
+            candidates.Add(
+                Path.Combine(
+                    Paths.PluginPath,
+                    "BladesOfChaos",
+                    ModelFileName));
 
-            candidates.Add(Path.Combine(
-                Paths.PluginPath, "ULTRADROID.BladesOfChaos", ModelFileName));
+            candidates.Add(
+                Path.Combine(
+                    Paths.PluginPath,
+                    "ULTRADROID.BladesOfChaos",
+                    ModelFileName));
         }
-        catch { }
+        catch
+        {
+            // The assembly-relative locations may still be usable.
+        }
 
         for (int i = 0; i < candidates.Count; i++)
         {
@@ -247,7 +252,10 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 if (File.Exists(candidates[i]))
                     return candidates[i];
             }
-            catch { }
+            catch
+            {
+                // Continue to the next candidate.
+            }
         }
 
         return null;
@@ -257,15 +265,16 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     {
         _nodeTransforms.Clear();
         _mappedTransforms.Clear();
+
         _activeAnimation = null;
         _animationTime = 0f;
-        _nextAnimationDebugLog = 0f;
 
         GlbAnimationData[] animations =
             ModelAPI.ReadGLBAnimations(_modelPath);
 
         if (animations != null)
         {
+            // Prefer the Bow animation.
             for (int i = 0; i < animations.Length; i++)
             {
                 GlbAnimationData clip = animations[i];
@@ -273,31 +282,28 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 if (clip == null)
                     continue;
 
-                LogInfo(
-                    "Animation clip " + i + ": " + clip.Name +
-                    ", duration=" + clip.Duration +
-                    "s, tracks=" +
-                    (clip.Tracks == null ? 0 : clip.Tracks.Length));
-
-                if (_activeAnimation == null &&
-                    string.Equals(
-                        clip.Name,
-                        PreferredAnimationName,
-                        StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(
+                    clip.Name,
+                    PreferredAnimationName,
+                    StringComparison.OrdinalIgnoreCase))
                 {
                     _activeAnimation = clip;
+                    break;
                 }
             }
 
+            // If Bow is unavailable, use the first usable animation.
             if (_activeAnimation == null)
             {
                 for (int i = 0; i < animations.Length; i++)
                 {
-                    if (animations[i] != null &&
-                        animations[i].Tracks != null &&
-                        animations[i].Tracks.Length > 0)
+                    GlbAnimationData clip = animations[i];
+
+                    if (clip != null &&
+                        clip.Tracks != null &&
+                        clip.Tracks.Length > 0)
                     {
-                        _activeAnimation = animations[i];
+                        _activeAnimation = clip;
                         break;
                     }
                 }
@@ -310,18 +316,11 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             hierarchy.nodes == null ||
             _modelRoot == null)
         {
-            LogWarning(
-                "Could not read the GLB node hierarchy; " +
-                "animation tracks cannot be mapped.");
             return;
         }
 
         Transform[] allTransforms =
             _modelRoot.GetComponentsInChildren<Transform>(true);
-
-        LogInfo(
-            "UNITY HIERARCHY: transforms=" + allTransforms.Length +
-            ", root='" + _modelRoot.name + "'.");
 
         int sceneIndex = hierarchy.scene;
         int[] rootNodes = null;
@@ -336,9 +335,13 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             }
 
             if (hierarchy.scenes[sceneIndex] != null)
+            {
                 rootNodes = hierarchy.scenes[sceneIndex].nodes;
+            }
         }
 
+        // If the GLB does not provide usable scene roots,
+        // infer roots from the node-child relationships.
         if (rootNodes == null || rootNodes.Length == 0)
         {
             HashSet<int> childSet = new HashSet<int>();
@@ -365,10 +368,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             rootNodes = inferredRoots.ToArray();
         }
 
-        LogInfo(
-            "GLB HIERARCHY: nodes=" + hierarchy.nodes.Length +
-            ", sceneRoots=" + rootNodes.Length + ".");
-
         for (int i = 0; i < rootNodes.Length; i++)
         {
             MapNodeRecursive(
@@ -378,11 +377,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 allTransforms,
                 0);
         }
-
-        LogInfo(
-            "Animation node map completed: " +
-            _nodeTransforms.Count + " of " +
-            hierarchy.nodes.Length + " glTF nodes mapped.");
     }
 
     private void MapNodeRecursive(
@@ -414,16 +408,8 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         if (mapped == null)
         {
-            LogWarning(
-                "NODE MAP FAILED: node=" + nodeIndex +
-                ", name='" + (node.name ?? "unnamed") +
-                "', expectedParent='" +
-                (expectedParent != null
-                    ? expectedParent.name
-                    : "<null>") + "'.");
-
-            // Continue searching for descendants beneath the nearest
-            // parent that could be mapped.
+            // Keep searching for descendants even if this node
+            // could not be matched to a Unity Transform.
             if (node.children != null)
             {
                 for (int i = 0; i < node.children.Length; i++)
@@ -442,15 +428,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         _nodeTransforms[nodeIndex] = mapped;
         _mappedTransforms.Add(mapped);
-
-        LogDebug(
-            "NODE MAP OK: glTF node=" + nodeIndex +
-            ", glTF name='" + (node.name ?? "unnamed") +
-            "', Unity name='" + mapped.name +
-            "', Unity ID=" + mapped.GetInstanceID() +
-            ", parent='" +
-            (mapped.parent != null ? mapped.parent.name : "<none>") +
-            "'.");
 
         if (node.children == null)
             return;
@@ -478,7 +455,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         string generatedName = "GLTF_Node_" + nodeIndex;
         string alternateName = "Node_" + nodeIndex;
 
-        // Prefer an exact direct child.
+        // Prefer a matching direct child.
         for (int i = 0; i < expectedParent.childCount; i++)
         {
             Transform child = expectedParent.GetChild(i);
@@ -499,8 +476,8 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             }
         }
 
-        // Some loaders add wrapper transforms. Search descendants,
-        // but never search unrelated branches of the model.
+        // Support loaders that insert wrapper transforms.
+        // Do not match transforms outside the expected parent's branch.
         Transform bestMatch = null;
         int bestDepth = int.MaxValue;
 
@@ -538,17 +515,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             }
         }
 
-        if (bestMatch != null)
-        {
-            LogDebug(
-                "NODE MAP WRAPPER MATCH: node=" + nodeIndex +
-                ", name='" + bestMatch.name +
-                "', depth=" + bestDepth + ".");
-
-            return bestMatch;
-        }
-
-        return null;
+        return bestMatch;
     }
 
     private static bool IsExpectedNodeName(
@@ -566,13 +533,13 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                     originalName,
                     StringComparison.Ordinal)) ||
                string.Equals(
-                    candidateName,
-                    generatedName,
-                    StringComparison.Ordinal) ||
+                   candidateName,
+                   generatedName,
+                   StringComparison.Ordinal) ||
                string.Equals(
-                    candidateName,
-                    alternateName,
-                    StringComparison.Ordinal);
+                   candidateName,
+                   alternateName,
+                   StringComparison.Ordinal);
     }
 
     private static int GetDepthBelow(
@@ -597,120 +564,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         return -1;
     }
 
-    private void LogMappedHierarchyDiagnostics()
-    {
-        int shown = 0;
-
-        foreach (KeyValuePair<int, Transform> pair in _nodeTransforms)
-        {
-            if (shown >= 12)
-                break;
-
-            Transform target = pair.Value;
-
-            if (target == null)
-                continue;
-
-            LogInfo(
-                "MAPPED NODE: glTF=" + pair.Key +
-                ", transform='" + target.name +
-                "', ID=" + target.GetInstanceID() +
-                ", parent='" +
-                (target.parent != null ? target.parent.name : "<none>") +
-                "', children=" + target.childCount +
-                ", localPosition=" + target.localPosition +
-                ", localRotation=" + target.localRotation);
-
-            shown++;
-        }
-
-        LogInfo(
-            "MAPPED NODE DIAGNOSTICS: displayed " +
-            shown + " entries.");
-    }
-
-    private void LogSkinningDiagnostics()
-    {
-        if (_modelRoot == null)
-            return;
-
-        SkinnedMeshRenderer[] skinnedRenderers =
-            _modelRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true);
-
-        MeshRenderer[] meshRenderers =
-            _modelRoot.GetComponentsInChildren<MeshRenderer>(true);
-
-        LogInfo(
-            "RENDER DIAGNOSTIC: skinnedRenderers=" +
-            skinnedRenderers.Length +
-            ", staticMeshRenderers=" + meshRenderers.Length + ".");
-
-        int totalBones = 0;
-        int mappedBones = 0;
-
-        for (int r = 0; r < skinnedRenderers.Length; r++)
-        {
-            SkinnedMeshRenderer renderer = skinnedRenderers[r];
-
-            if (renderer == null)
-                continue;
-
-            Transform[] bones = renderer.bones;
-            int boneCount = bones != null ? bones.Length : 0;
-            int rendererMappedBones = 0;
-
-            totalBones += boneCount;
-
-            for (int b = 0; b < boneCount; b++)
-            {
-                Transform bone = bones[b];
-
-                if (bone == null)
-                    continue;
-
-                foreach (KeyValuePair<int, Transform> pair in _nodeTransforms)
-                {
-                    if (pair.Value == bone)
-                    {
-                        rendererMappedBones++;
-                        mappedBones++;
-                        break;
-                    }
-                }
-            }
-
-            LogInfo(
-                "SKINNING: renderer='" + renderer.name +
-                "', enabled=" + renderer.enabled +
-                ", bones=" + boneCount +
-                ", mappedAnimationBones=" + rendererMappedBones +
-                ", mesh='" +
-                (renderer.sharedMesh != null
-                    ? renderer.sharedMesh.name
-                    : "<null>") + "'.");
-        }
-
-        LogInfo(
-            "SKINNING SUMMARY: mappedBones=" +
-            mappedBones + "/" + totalBones + ".");
-
-        for (int i = 0; i < meshRenderers.Length && i < 8; i++)
-        {
-            MeshRenderer renderer = meshRenderers[i];
-
-            if (renderer == null)
-                continue;
-
-            LogInfo(
-                "STATIC MESH: renderer='" + renderer.name +
-                "', enabled=" + renderer.enabled +
-                ", parent='" +
-                (renderer.transform.parent != null
-                    ? renderer.transform.parent.name
-                    : "<none>") + "'.");
-        }
-    }
-
     private void UpdateAnimation(float deltaTime)
     {
         if (_activeAnimation == null ||
@@ -725,24 +578,14 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             duration = FindAnimationDuration(_activeAnimation);
 
         if (duration <= 0f)
-        {
-            LogWarning("ANIM DETAIL: animation duration is zero.");
             return;
-        }
 
         _animationTime += Mathf.Max(0f, deltaTime);
+
+        // Loop the selected animation.
         float time = _animationTime % duration;
 
         GlbAnimationTrack[] tracks = _activeAnimation.Tracks;
-
-        int applied = 0;
-        int missing = 0;
-        int badSamples = 0;
-        int unsupported = 0;
-        int unknownPath = 0;
-
-        StringBuilder details = new StringBuilder();
-        int detailCount = Mathf.Min(5, tracks.Length);
 
         for (int i = 0; i < tracks.Length; i++)
         {
@@ -754,64 +597,61 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             Transform target;
 
             if (!_nodeTransforms.TryGetValue(
-                    track.TargetNode, out target) ||
+                    track.TargetNode,
+                    out target) ||
                 target == null)
             {
-                missing++;
-
-                if (i < detailCount)
-                {
-                    details.Append(
-                        "\nTRACK " + i +
-                        ": node=" + track.TargetNode +
-                        ", path=" + track.Path +
-                        ", TARGET MISSING");
-                }
-
                 continue;
             }
 
             string path = track.Path;
 
+            // Morph-target animation and cubic spline interpolation
+            // are not implemented by this runner.
             if (path == "weights" ||
                 string.Equals(
                     track.Interpolation,
                     "CUBICSPLINE",
                     StringComparison.OrdinalIgnoreCase))
             {
-                unsupported++;
                 continue;
             }
 
             int components;
 
             if (path == "translation" || path == "scale")
+            {
                 components = 3;
+            }
             else if (path == "rotation")
+            {
                 components = 4;
+            }
             else
             {
-                unknownPath++;
                 continue;
             }
 
             float[] values = new float[components];
 
             if (!TrySample(track, time, components, values))
-            {
-                badSamples++;
                 continue;
-            }
 
             if (path == "translation")
             {
                 target.localPosition =
-                    new Vector3(values[0], values[1], values[2]);
+                    new Vector3(
+                        values[0],
+                        values[1],
+                        values[2]);
             }
             else if (path == "scale")
             {
                 target.localScale =
-                    new Vector3(values[0], values[1], values[2]);
+                    new Vector3(
+                        values[0],
+                        values[1],
+                        values[2]);
             }
             else if (path == "rotation")
             {
@@ -822,83 +662,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                         values[2],
                         values[3]).normalized;
             }
-
-            applied++;
-
-            if (i < detailCount)
-            {
-                Transform parent = target.parent;
-
-                details.Append(
-                    "\nTRACK " + i +
-                    ": node=" + track.TargetNode +
-                    ", path=" + path +
-                    ", interpolation=" + track.Interpolation +
-                    ", targetName=" + target.name +
-                    ", targetID=" + target.GetInstanceID() +
-                    ", parent=" +
-                    (parent != null ? parent.name : "<none>") +
-                    ", children=" + target.childCount +
-                    ", sampled=[");
-
-                for (int c = 0; c < components; c++)
-                {
-                    if (c > 0)
-                        details.Append(", ");
-
-                    details.Append(values[c].ToString("F3"));
-                }
-
-                details.Append("]");
-
-                if (path == "translation")
-                {
-                    Vector3 p = target.localPosition;
-
-                    details.Append(
-                        ", actualPosition=[" +
-                        p.x.ToString("F3") + ", " +
-                        p.y.ToString("F3") + ", " +
-                        p.z.ToString("F3") + "]");
-                }
-                else if (path == "scale")
-                {
-                    Vector3 s = target.localScale;
-
-                    details.Append(
-                        ", actualScale=[" +
-                        s.x.ToString("F3") + ", " +
-                        s.y.ToString("F3") + ", " +
-                        s.z.ToString("F3") + "]");
-                }
-                else if (path == "rotation")
-                {
-                    Quaternion r = target.localRotation;
-
-                    details.Append(
-                        ", actualRotation=[" +
-                        r.x.ToString("F3") + ", " +
-                        r.y.ToString("F3") + ", " +
-                        r.z.ToString("F3") + ", " +
-                        r.w.ToString("F3") + "]");
-                }
-            }
-        }
-
-        if (Time.unscaledTime >= _nextAnimationDebugLog)
-        {
-            _nextAnimationDebugLog = Time.unscaledTime + 2f;
-
-            LogInfo(
-                "ANIM DETAIL: time=" + time.ToString("F2") +
-                "/" + duration.ToString("F2") +
-                ", tracks=" + tracks.Length +
-                ", applied=" + applied +
-                ", missing=" + missing +
-                ", badSamples=" + badSamples +
-                ", unsupported=" + unsupported +
-                ", unknownPaths=" + unknownPath +
-                details.ToString());
         }
     }
 
@@ -956,6 +719,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         float[] times = track.Times;
         float[] values = track.Values;
+
         int last = times.Length - 1;
 
         if (time <= times[0])
@@ -998,6 +762,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         }
 
         float span = times[right] - times[left];
+
         float alpha = span <= 0.000001f
             ? 0f
             : (time - times[left]) / span;
@@ -1072,8 +837,10 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         byte[] bytes = File.ReadAllBytes(path);
 
         if (bytes.Length < 20)
+        {
             throw new InvalidDataException(
                 "File is too short to be a valid GLB.");
+        }
 
         int offset = 12;
         const uint JsonChunkType = 0x4E4F534A;
@@ -1095,8 +862,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             if (chunkType == JsonChunkType)
             {
                 return Encoding.UTF8.GetString(
-                    bytes, offset, chunkLength)
-                    .Trim('\0', ' ', '\r', '\n', '\t');
+                    bytes,
+                    offset,
+                    chunkLength).Trim('\0', ' ', '\r', '\n', '\t');
             }
 
             offset += chunkLength;
@@ -1114,16 +882,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         _modelRoot = null;
         _activeAnimation = null;
         _animationTime = 0f;
-        _nextAnimationDebugLog = 0f;
 
         _nodeTransforms.Clear();
         _mappedTransforms.Clear();
-    }
-
-    private static void LogInfo(string message)
-    {
-        if (PluginLog != null)
-            PluginLog.LogInfo("[Blades of Chaos] " + message);
     }
 
     private static void LogWarning(string message)
@@ -1136,12 +897,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     {
         if (PluginLog != null)
             PluginLog.LogError("[Blades of Chaos] " + message);
-    }
-
-    private static void LogDebug(string message)
-    {
-        if (PluginLog != null)
-            PluginLog.LogDebug("[Blades of Chaos] " + message);
     }
 }
 
@@ -1181,6 +936,7 @@ public static class GlbHierarchyParser
         if (root.TryGetValue("scenes", out scenesValue))
         {
             List<object> rawScenes = AsArray(scenesValue);
+
             result.scenes = new GlbSceneData[rawScenes.Count];
 
             for (int i = 0; i < rawScenes.Count; i++)
@@ -1200,6 +956,7 @@ public static class GlbHierarchyParser
         if (root.TryGetValue("nodes", out nodesValue))
         {
             List<object> rawNodes = AsArray(nodesValue);
+
             result.nodes = new GlbNodeData[rawNodes.Count];
 
             for (int i = 0; i < rawNodes.Count; i++)
@@ -1209,9 +966,10 @@ public static class GlbHierarchyParser
 
                 object nameValue;
 
-                string name = nodeObject.TryGetValue("name", out nameValue)
-                    ? nameValue as string
-                    : null;
+                string name =
+                    nodeObject.TryGetValue("name", out nameValue)
+                        ? nameValue as string
+                        : null;
 
                 result.nodes[i] = new GlbNodeData
                 {
@@ -1252,8 +1010,10 @@ public static class GlbHierarchyParser
         for (int i = 0; i < array.Count; i++)
         {
             if (!(array[i] is double))
+            {
                 throw new InvalidDataException(
                     "Expected an integer in JSON array '" + key + "'.");
+            }
 
             result[i] = (int)(double)array[i];
         }
@@ -1401,6 +1161,7 @@ public static class GlbHierarchyParser
         private string ReadString()
         {
             Expect('"');
+
             StringBuilder result = new StringBuilder();
 
             while (_position < _json.Length)
@@ -1423,14 +1184,37 @@ public static class GlbHierarchyParser
 
                 switch (escape)
                 {
-                    case '"': result.Append('"'); break;
-                    case '\\': result.Append('\\'); break;
-                    case '/': result.Append('/'); break;
-                    case 'b': result.Append('\b'); break;
-                    case 'f': result.Append('\f'); break;
-                    case 'n': result.Append('\n'); break;
-                    case 'r': result.Append('\r'); break;
-                    case 't': result.Append('\t'); break;
+                    case '"':
+                        result.Append('"');
+                        break;
+
+                    case '\\':
+                        result.Append('\\');
+                        break;
+
+                    case '/':
+                        result.Append('/');
+                        break;
+
+                    case 'b':
+                        result.Append('\b');
+                        break;
+
+                    case 'f':
+                        result.Append('\f');
+                        break;
+
+                    case 'n':
+                        result.Append('\n');
+                        break;
+
+                    case 'r':
+                        result.Append('\r');
+                        break;
+
+                    case 't':
+                        result.Append('\t');
+                        break;
 
                     case 'u':
                         if (_position + 4 > _json.Length)
@@ -1499,7 +1283,8 @@ public static class GlbHierarchyParser
             }
 
             string number = _json.Substring(
-                start, _position - start);
+                start,
+                _position - start);
 
             double value;
 
