@@ -1,83 +1,67 @@
-
 name: build
 
 on:
-  push:
-  workflow_dispatch:
+push:
+workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+steps:  
+  - name: Checkout repository  
+    uses: actions/checkout@v4  
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
+  - name: Setup .NET  
+    uses: actions/setup-dotnet@v4  
+    with:  
+      dotnet-version: 10.0.x  
 
-      - name: Check required game assemblies
-        run: |
-          required=(
-            Assembly-CSharp.dll
-            Il2Cppmscorlib.dll
-            Il2CppInterop.Runtime.dll
-            UnityEngine.CoreModule.dll
-            UnityEngine.JSONSerializeModule.dll
-            UnityEngine.ImageConversionModule.dll
-            UnityEngine.PhysicsModule.dll
-          )
+  - name: Check required game assemblies  
+    run: |  
+      required=(  
+        Assembly-CSharp.dll  
+        Il2Cppmscorlib.dll  
+        Il2CppInterop.Runtime.dll  
+        UnityEngine.CoreModule.dll  
+        UnityEngine.JSONSerializeModule.dll  
+        UnityEngine.ImageConversionModule.dll  
+        UnityEngine.PhysicsModule.dll  
+      )  
 
-          for file in "${required[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "::error::Missing required assembly: $file"
-              exit 1
-            fi
-          done
+      for file in "${required[@]}"; do  
+        if [ ! -f "$file" ]; then  
+          echo "::error::Missing required assembly: $file"  
+          exit 1  
+        fi  
+      done  
 
-      - name: Check ULTRADROID dependencies
-        run: |
-          for file in ULTRADROID.API.dll ULTRADROID.Core.dll; do
-            if [ ! -f "$file" ]; then
-              echo "::error::Missing required dependency: $file"
-              exit 1
-            fi
-          done
+  - name: Restore example and API  
+    run: |  
+      dotnet restore examples/ExampleMod.csproj \  
+        --source https://api.nuget.org/v3/index.json \  
+        --source https://nuget.bepinex.dev/v3/index.json  
 
-      - name: Restore example and API
-        run: |
-          dotnet restore examples/ExampleMod.csproj \
-            --source https://api.nuget.org/v3/index.json \
-            --source https://nuget.bepinex.dev/v3/index.json
+  - name: Build API and weapon plugin  
+    run: |  
+      dotnet build examples/ExampleMod.csproj \  
+        --configuration Release \  
+        --no-restore  
 
-      - name: Build API and weapon plugin
-        run: |
-          dotnet build examples/ExampleMod.csproj \
-            --configuration Release \
-            --no-restore
+  - name: Verify output DLLs  
+    run: |  
+      test -f bin/Release/net10.0/ULTRADROID.Models.dll  
+      test -f examples/bin/Release/net10.0/WeaponModExample.dll  
 
-      - name: Verify output DLLs
-        run: |
-          test -f bin/Release/net10.0/ULTRADROID.Models.dll
-          test -f examples/bin/Release/net10.0/WeaponModExample.dll
-          test -f ULTRADROID.API.dll
-          test -f ULTRADROID.Core.dll
+      echo "Both plugins built successfully:"  
+      ls -lh bin/Release/net10.0/ULTRADROID.Models.dll  
+      ls -lh examples/bin/Release/net10.0/WeaponModExample.dll  
 
-          echo "Build outputs:"
-          ls -lh bin/Release/net10.0/ULTRADROID.Models.dll
-          ls -lh examples/bin/Release/net10.0/WeaponModExample.dll
-          ls -lh ULTRADROID.API.dll
-          ls -lh ULTRADROID.Core.dll
-
-      - name: Upload plugins and dependencies
-        uses: actions/upload-artifact@v4
-        with:
-          name: ULTRADROID-Plugins
-          path: |
-            bin/Release/net10.0/ULTRADROID.Models.dll
-            examples/bin/Release/net10.0/WeaponModExample.dll
-            ULTRADROID.API.dll
-            ULTRADROID.Core.dll
-          if-no-files-found: error
+  - name: Upload both plugins  
+    uses: actions/upload-artifact@v4  
+    with:  
+      name: ULTRADROID-Plugins  
+      path: |  
+        bin/Release/net10.0/ULTRADROID.Models.dll  
+        examples/bin/Release/net10.0/WeaponModExample.dll  
+      if-no-files-found: error
