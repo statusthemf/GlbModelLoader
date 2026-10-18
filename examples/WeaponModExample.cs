@@ -35,6 +35,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     private string _lastSceneName = "";
     private float _nextLoadAttempt;
     private float _animationTime;
+    private float _nextAnimationDebugLog;
     private GlbAnimationData _activeAnimation;
 
     private readonly Dictionary<int, Transform> _nodeTransforms =
@@ -251,6 +252,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         _mappedTransforms.Clear();
         _activeAnimation = null;
         _animationTime = 0f;
+        _nextAnimationDebugLog = 0f;
 
         GlbAnimationData[] animations =
             ModelAPI.ReadGLBAnimations(_modelPath);
@@ -473,6 +475,8 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         return null;
     }
 
+    // Animation diagnostics: reports whether time advances and
+    // how many tracks are successfully applied.
     private void UpdateAnimation(float deltaTime)
     {
         if (_activeAnimation == null ||
@@ -487,11 +491,20 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             duration = FindAnimationDuration(_activeAnimation);
 
         if (duration <= 0f)
+        {
+            LogWarning("ANIM DEBUG: animation duration is zero.");
             return;
+        }
 
         _animationTime += Mathf.Max(0f, deltaTime);
-
         float time = _animationTime % duration;
+
+        int total = _activeAnimation.Tracks.Length;
+        int applied = 0;
+        int missingNode = 0;
+        int unsupported = 0;
+        int badSample = 0;
+        int unknownPath = 0;
 
         GlbAnimationTrack[] tracks = _activeAnimation.Tracks;
 
@@ -508,50 +521,83 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                     track.TargetNode, out target) ||
                 target == null)
             {
+                missingNode++;
                 continue;
             }
 
-            if (track.Path == "weights")
+            string path = track.Path;
+
+            if (path == "weights")
+            {
+                unsupported++;
                 continue;
+            }
 
             if (string.Equals(
                 track.Interpolation,
                 "CUBICSPLINE",
                 StringComparison.OrdinalIgnoreCase))
             {
+                unsupported++;
                 continue;
             }
 
-            if (track.Path == "translation")
-            {
-                float[] v = new float[3];
+            int components;
 
-                if (TrySample(track, time, 3, v))
-                {
-                    target.localPosition =
-                        new Vector3(v[0], v[1], v[2]);
-                }
-            }
-            else if (track.Path == "scale")
+            if (path == "translation" || path == "scale")
+                components = 3;
+            else if (path == "rotation")
+                components = 4;
+            else
             {
-                float[] v = new float[3];
-
-                if (TrySample(track, time, 3, v))
-                {
-                    target.localScale =
-                        new Vector3(v[0], v[1], v[2]);
-                }
+                unknownPath++;
+                continue;
             }
-            else if (track.Path == "rotation")
+
+            float[] values = new float[components];
+
+            if (!TrySample(track, time, components, values))
             {
-                float[] v = new float[4];
-
-                if (TrySample(track, time, 4, v))
-                {
-                    target.localRotation =
-                        new Quaternion(v[0], v[1], v[2], v[3]).normalized;
-                }
+                badSample++;
+                continue;
             }
+
+            if (path == "translation")
+            {
+                target.localPosition =
+                    new Vector3(values[0], values[1], values[2]);
+            }
+            else if (path == "scale")
+            {
+                target.localScale =
+                    new Vector3(values[0], values[1], values[2]);
+            }
+            else if (path == "rotation")
+            {
+                target.localRotation =
+                    new Quaternion(
+                        values[0],
+                        values[1],
+                        values[2],
+                        values[3]).normalized;
+            }
+
+            applied++;
+        }
+
+        if (Time.unscaledTime >= _nextAnimationDebugLog)
+        {
+            _nextAnimationDebugLog = Time.unscaledTime + 2f;
+
+            LogInfo(
+                "ANIM DEBUG: time=" + time.ToString("F2") +
+                "/" + duration.ToString("F2") +
+                ", tracks=" + total +
+                ", applied=" + applied +
+                ", missingNodes=" + missingNode +
+                ", badSamples=" + badSample +
+                ", unsupported=" + unsupported +
+                ", unknownPaths=" + unknownPath);
         }
     }
 
@@ -596,11 +642,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             return false;
         }
 
-        int valueStride = components;
-
-        // CUBICSPLINE stores three value entries per keyframe
-        // (incoming tangent, value, outgoing tangent). It is skipped
-        // by UpdateAnimation, but this guard prevents invalid indexing.
         if (string.Equals(
             track.Interpolation,
             "CUBICSPLINE",
@@ -609,7 +650,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             return false;
         }
 
-        if (track.Values.Length < track.Times.Length * valueStride)
+        if (track.Values.Length < track.Times.Length * components)
             return false;
 
         float[] times = track.Times;
@@ -681,7 +722,8 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 values[rightOffset + 2],
                 values[rightOffset + 3]).normalized;
 
-            Quaternion q = Quaternion.SlerpUnclamped(a, b, alpha).normalized;
+            Quaternion q =
+                Quaternion.SlerpUnclamped(a, b, alpha).normalized;
 
             output[0] = q.x;
             output[1] = q.y;
@@ -771,6 +813,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         _modelRoot = null;
         _activeAnimation = null;
         _animationTime = 0f;
+        _nextAnimationDebugLog = 0f;
 
         _nodeTransforms.Clear();
         _mappedTransforms.Clear();
@@ -822,8 +865,7 @@ public sealed class GlbNodeData
     public int[] children;
 }
 
-// Small JSON reader for the hierarchy fields only.
-// Avoids UnityEngine.JsonUtility and does not touch the existing GLB loader.
+// Small JSON reader for hierarchy fields only.
 public static class GlbHierarchyParser
 {
     public static GlbHierarchyData Parse(string json)
@@ -835,6 +877,7 @@ public static class GlbHierarchyParser
         result.scene = GetInt(root, "scene", 0);
 
         object scenesValue;
+
         if (root.TryGetValue("scenes", out scenesValue))
         {
             List<object> rawScenes = AsArray(scenesValue);
@@ -853,6 +896,7 @@ public static class GlbHierarchyParser
         }
 
         object nodesValue;
+
         if (root.TryGetValue("nodes", out nodesValue))
         {
             List<object> rawNodes = AsArray(nodesValue);
@@ -864,6 +908,7 @@ public static class GlbHierarchyParser
                     AsObject(rawNodes[i]);
 
                 object nameValue;
+
                 string name = nodeObject.TryGetValue("name", out nameValue)
                     ? nameValue as string
                     : null;
