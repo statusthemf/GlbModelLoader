@@ -61,13 +61,15 @@ namespace ULTRADROID.Models
             public GlbBoneWeight1[] Weights;
 
             public Matrix4x4[] SkinMatrices;
+            public Matrix4x4[] NormalMatrices;
             public Vector3[] DeformedVertices;
+            public Vector3[] DeformedNormals;
         }
 
         private static readonly List<CpuSkinningEntry>
             CpuSkinningEntries = new List<CpuSkinningEntry>();
 
-        // Animation-player registry (new)
+        // Animation-player registry
         private static readonly Dictionary<GameObject, GlbAnimationPlayer>
             AnimationPlayers =
                 new Dictionary<GameObject, GlbAnimationPlayer>();
@@ -155,7 +157,7 @@ namespace ULTRADROID.Models
                 Material[] materials =
                     BuildMaterials(doc, textures);
 
-                // Modified: capture node transforms and create player
+                // Capture node transforms and create player
                 Transform[] nodeTransforms =
                     BuildScene(doc, root.transform, materials, options);
 
@@ -465,7 +467,6 @@ namespace ULTRADROID.Models
         // SCENE AND NODE HIERARCHY
         // ------------------------------------------------------------
 
-        // Modified: now returns Transform[]
         private static Transform[] BuildScene(
             GlbDocument doc,
             Transform root,
@@ -767,7 +768,7 @@ namespace ULTRADROID.Models
         }
 
         // ------------------------------------------------------------
-        // CPU SKINNING FALLBACK
+        // CPU SKINNING FALLBACK (OPTIMIZED)
         // ------------------------------------------------------------
 
         private static void RegisterCpuSkinning(
@@ -811,6 +812,28 @@ namespace ULTRADROID.Models
                     "CPU skinning weight count mismatch.");
             }
 
+            // Prefer the original normals supplied by the GLB.
+            // If none were present, fall back to whatever BuildMesh
+            // already calculated on the mesh.
+            Vector3[] normals = originalNormals;
+
+            if (normals == null || normals.Length != originalVertices.Length)
+            {
+                try
+                {
+                    normals = mesh.normals;
+                }
+                catch
+                {
+                    normals = null;
+                }
+            }
+
+            if (normals != null && normals.Length != originalVertices.Length)
+                normals = null;
+
+            mesh.MarkDynamic();
+
             CpuSkinningEntry entry = new CpuSkinningEntry
             {
                 ModelRoot = modelRoot,
@@ -819,9 +842,9 @@ namespace ULTRADROID.Models
 
                 OriginalVertices = (Vector3[])originalVertices.Clone(),
 
-                OriginalNormals = originalNormals == null
+                OriginalNormals = normals == null
                     ? null
-                    : (Vector3[])originalNormals.Clone(),
+                    : (Vector3[])normals.Clone(),
 
                 Bones = (Transform[])bones.Clone(),
                 BindPoses = (Matrix4x4[])bindPoses.Clone(),
@@ -830,7 +853,12 @@ namespace ULTRADROID.Models
                 Weights = allBoneWeights.ToArray(),
 
                 SkinMatrices = new Matrix4x4[bones.Length],
-                DeformedVertices = new Vector3[originalVertices.Length]
+                NormalMatrices = new Matrix4x4[bones.Length],
+                DeformedVertices = new Vector3[originalVertices.Length],
+
+                DeformedNormals = normals == null
+                    ? null
+                    : new Vector3[normals.Length]
             };
 
             CpuSkinningEntries.Add(entry);
@@ -872,14 +900,12 @@ namespace ULTRADROID.Models
             }
         }
 
-        private static void UpdateCpuSkinningEntry(
-            CpuSkinningEntry entry)
+        private static void UpdateCpuSkinningEntry(CpuSkinningEntry entry)
         {
             Transform meshTransform = entry.MeshTransform;
+            Matrix4x4 worldToMesh = meshTransform.worldToLocalMatrix;
 
-            Matrix4x4 worldToMesh =
-                meshTransform.worldToLocalMatrix;
-
+            // Build skinning matrices once per bone.
             for (int b = 0; b < entry.Bones.Length; b++)
             {
                 Transform bone = entry.Bones[b];
@@ -888,26 +914,38 @@ namespace ULTRADROID.Models
                     throw new InvalidOperationException(
                         "CPU skinning encountered a missing bone.");
 
-                entry.SkinMatrices[b] =
+                Matrix4x4 skinMatrix =
                     worldToMesh *
                     bone.localToWorldMatrix *
                     entry.BindPoses[b];
+
+                entry.SkinMatrices[b] = skinMatrix;
+
+                // Only compute the inverse-transpose when we actually
+                // have normals to transform.
+                if (entry.OriginalNormals != null)
+                    entry.NormalMatrices[b] = skinMatrix.inverse.transpose;
             }
 
             int weightIndex = 0;
 
+            bool hasNormals =
+                entry.OriginalNormals != null &&
+                entry.DeformedNormals != null &&
+                entry.OriginalNormals.Length == entry.OriginalVertices.Length;
+
             for (int v = 0; v < entry.OriginalVertices.Length; v++)
             {
-                Vector3 original = entry.OriginalVertices[v];
-                Vector3 result = Vector3.zero;
+                Vector3 originalVertex = entry.OriginalVertices[v];
+                Vector3 deformedVertex = Vector3.zero;
+                Vector3 deformedNormal = Vector3.zero;
 
                 int influenceCount = entry.BonesPerVertex[v];
                 float totalWeight = 0f;
 
                 for (int j = 0; j < influenceCount; j++)
                 {
-                    GlbBoneWeight1 weight =
-                        entry.Weights[weightIndex++];
+                    GlbBoneWeight1 weight = entry.Weights[weightIndex++];
 
                     if (weight.boneIndex < 0 ||
                         weight.boneIndex >= entry.SkinMatrices.Length)
@@ -919,28 +957,56 @@ namespace ULTRADROID.Models
                     if (weight.weight <= 0f)
                         continue;
 
-                    Vector3 transformed =
-                        entry.SkinMatrices[weight.boneIndex]
-                            .MultiplyPoint3x4(original);
+                    int boneIndex = weight.boneIndex;
+                    float influence = weight.weight;
 
-                    result += transformed * weight.weight;
-                    totalWeight += weight.weight;
+                    deformedVertex +=
+                        entry.SkinMatrices[boneIndex]
+                            .MultiplyPoint3x4(originalVertex) * influence;
+
+                    if (hasNormals)
+                    {
+                        deformedNormal +=
+                            entry.NormalMatrices[boneIndex]
+                                .MultiplyVector(entry.OriginalNormals[v]) *
+                            influence;
+                    }
+
+                    totalWeight += influence;
                 }
 
                 if (totalWeight > 0.000001f)
-                    entry.DeformedVertices[v] = result / totalWeight;
+                {
+                    entry.DeformedVertices[v] = deformedVertex / totalWeight;
+
+                    if (hasNormals)
+                    {
+                        deformedNormal /= totalWeight;
+
+                        float lenSq = deformedNormal.sqrMagnitude;
+                        entry.DeformedNormals[v] =
+                            lenSq > 0.000001f
+                                ? deformedNormal / Mathf.Sqrt(lenSq)
+                                : entry.OriginalNormals[v];
+                    }
+                }
                 else
-                    entry.DeformedVertices[v] = original;
+                {
+                    entry.DeformedVertices[v] = originalVertex;
+
+                    if (hasNormals)
+                        entry.DeformedNormals[v] = entry.OriginalNormals[v];
+                }
             }
 
+            // Write the deformed buffers. Do NOT call RecalculateNormals().
             entry.Mesh.vertices = entry.DeformedVertices;
 
-            // Keep the mesh's visible bounds up to date as it deforms.
-            entry.Mesh.RecalculateBounds();
+            if (hasNormals)
+                entry.Mesh.normals = entry.DeformedNormals;
 
-            // Recalculate normals so lighting follows the deformation.
-            // This can be expensive on large meshes.
-            entry.Mesh.RecalculateNormals();
+            // Bounds still need to track the deformed geometry.
+            entry.Mesh.RecalculateBounds();
         }
 
         // ------------------------------------------------------------
