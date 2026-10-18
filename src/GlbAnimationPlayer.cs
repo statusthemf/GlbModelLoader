@@ -1,26 +1,27 @@
 
 using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 
 namespace ULTRADROID.Models
 {
+    /// <summary>
+    /// Plays animations stored in a GLB model.
+    /// GlbAnimationData and GlbAnimationTrack remain defined
+    /// in GlbModelLoader.cs.
+    /// </summary>
     public sealed class GlbAnimationPlayer
     {
-        private readonly GameObject _modelRoot;
+        private readonly GameObject _root;
         private readonly GlbAnimationData[] _animations;
         private readonly Transform[] _nodeTransforms;
 
-        private readonly Vector3[] _originalPositions;
-        private readonly Quaternion[] _originalRotations;
-        private readonly Vector3[] _originalScales;
-
-        private GlbAnimationData _currentAnimation;
+        private object _currentAnimation;
         private float _time;
-        private bool _loop;
         private bool _playing;
         private bool _paused;
-
-        public float PlaybackSpeed { get; set; } = 1f;
 
         public bool IsPlaying
         {
@@ -32,104 +33,98 @@ namespace ULTRADROID.Models
             get { return _paused; }
         }
 
+        public float PlaybackSpeed { get; set; } = 1f;
+
+        public bool Loop { get; set; } = true;
+
         public string CurrentAnimationName
         {
-            get { return _currentAnimation?.Name; }
+            get
+            {
+                return GetString(
+                    _currentAnimation,
+                    "Name", "name",
+                    "AnimationName", "animationName");
+            }
         }
 
-        public float CurrentTime
-        {
-            get { return _time; }
-        }
-
-        public float CurrentDuration
+        public float Duration
         {
             get { return GetDuration(_currentAnimation); }
         }
 
-        public int AnimationCount
+        public float Time
         {
-            get { return _animations.Length; }
+            get { return _time; }
         }
 
         public GlbAnimationPlayer(
-            GameObject modelRoot,
+            GameObject root,
             GlbAnimationData[] animations,
             Transform[] nodeTransforms)
         {
-            _modelRoot = modelRoot;
+            _root = root;
             _animations = animations ?? new GlbAnimationData[0];
             _nodeTransforms = nodeTransforms ?? new Transform[0];
 
-            _originalPositions = new Vector3[_nodeTransforms.Length];
-            _originalRotations = new Quaternion[_nodeTransforms.Length];
-            _originalScales = new Vector3[_nodeTransforms.Length];
-
-            for (int i = 0; i < _nodeTransforms.Length; i++)
-            {
-                Transform node = _nodeTransforms[i];
-
-                if (node == null)
-                    continue;
-
-                _originalPositions[i] = node.localPosition;
-                _originalRotations[i] = node.localRotation;
-                _originalScales[i] = node.localScale;
-            }
+            _currentAnimation = null;
+            _time = 0f;
+            _playing = false;
+            _paused = false;
+            PlaybackSpeed = 1f;
+            Loop = true;
         }
 
-        public string GetAnimationName(int index)
+        public bool Play(string clipName, bool loop = true)
         {
-            if (index < 0 || index >= _animations.Length)
-                return null;
-
-            return _animations[index]?.Name;
-        }
-
-        public bool Play(string name, bool loop)
-        {
-            if (string.IsNullOrEmpty(name))
+            if (string.IsNullOrEmpty(clipName))
                 return false;
 
             for (int i = 0; i < _animations.Length; i++)
             {
-                GlbAnimationData animation = _animations[i];
+                object animation = _animations[i];
 
-                if (animation != null &&
-                    string.Equals(
-                        animation.Name,
-                        name,
-                        StringComparison.OrdinalIgnoreCase))
+                string name = GetString(
+                    animation,
+                    "Name", "name",
+                    "AnimationName", "animationName");
+
+                if (string.Equals(
+                    name,
+                    clipName,
+                    StringComparison.OrdinalIgnoreCase))
                 {
-                    return Play(i, loop);
+                    return PlayAnimation(animation, loop);
                 }
             }
 
             return false;
         }
 
-        public bool Play(int index, bool loop)
+        public bool Play(int animationIndex, bool loop = true)
         {
-            if (index < 0 || index >= _animations.Length)
+            if (animationIndex < 0 ||
+                animationIndex >= _animations.Length)
+            {
                 return false;
+            }
 
-            GlbAnimationData animation = _animations[index];
+            return PlayAnimation(_animations[animationIndex], loop);
+        }
 
+        private bool PlayAnimation(object animation, bool loop)
+        {
             if (animation == null)
                 return false;
 
             _currentAnimation = animation;
-            _loop = loop;
+            _time = 0f;
             _playing = true;
             _paused = false;
+            Loop = loop;
 
-            float duration = GetDuration(animation);
-            _time = PlaybackSpeed < 0f ? duration : 0f;
-
-            ApplyAnimation(_currentAnimation, _time);
-
-            if (_modelRoot != null)
-                ModelAPI.UpdateCpuSkinning(_modelRoot);
+            SampleAnimation(_time);
+            UpdateSkinning();
 
             return true;
         }
@@ -150,13 +145,13 @@ namespace ULTRADROID.Models
         {
             _playing = false;
             _paused = false;
-            _currentAnimation = null;
             _time = 0f;
 
-            RestoreOriginalTransforms();
-
-            if (_modelRoot != null)
-                ModelAPI.UpdateCpuSkinning(_modelRoot);
+            if (_currentAnimation != null)
+            {
+                SampleAnimation(0f);
+                UpdateSkinning();
+            }
         }
 
         public void Update(float deltaTime)
@@ -164,463 +159,509 @@ namespace ULTRADROID.Models
             if (!_playing || _paused || _currentAnimation == null)
                 return;
 
-            if (_modelRoot == null)
+            if (_root == null)
             {
                 _playing = false;
                 return;
             }
 
-            float duration = GetDuration(_currentAnimation);
+            float duration = Duration;
 
             if (duration <= 0f)
             {
-                ApplyAnimation(_currentAnimation, 0f);
-                ModelAPI.UpdateCpuSkinning(_modelRoot);
+                SampleAnimation(0f);
+                UpdateSkinning();
+
+                if (!Loop)
+                    _playing = false;
+
                 return;
             }
 
             _time += deltaTime * PlaybackSpeed;
 
-            if (_loop)
+            if (Loop)
             {
-                _time = Mathf.Repeat(_time, duration);
+                _time %= duration;
+
+                if (_time < 0f)
+                    _time += duration;
             }
             else
             {
                 if (_time >= duration)
                 {
                     _time = duration;
-                    ApplyAnimation(_currentAnimation, _time);
                     _playing = false;
-                    ModelAPI.UpdateCpuSkinning(_modelRoot);
-                    return;
                 }
-
-                if (_time <= 0f)
+                else if (_time <= 0f && PlaybackSpeed < 0f)
                 {
                     _time = 0f;
-                    ApplyAnimation(_currentAnimation, _time);
-
-                    if (PlaybackSpeed < 0f)
-                        _playing = false;
-
-                    ModelAPI.UpdateCpuSkinning(_modelRoot);
-                    return;
+                    _playing = false;
                 }
             }
 
-            ApplyAnimation(_currentAnimation, _time);
-            ModelAPI.UpdateCpuSkinning(_modelRoot);
+            SampleAnimation(_time);
+            UpdateSkinning();
         }
 
-        private void ApplyAnimation(
-            GlbAnimationData animation,
-            float time)
+        private void UpdateSkinning()
         {
-            if (animation == null || animation.Tracks == null)
+            if (_root == null)
                 return;
 
-            for (int i = 0; i < animation.Tracks.Length; i++)
+            try
             {
-                GlbAnimationTrack track = animation.Tracks[i];
-
-                if (track == null ||
-                    track.TargetNode < 0 ||
-                    track.TargetNode >= _nodeTransforms.Length)
-                    continue;
-
-                Transform target = _nodeTransforms[track.TargetNode];
-
-                if (target == null ||
-                    track.Times == null ||
-                    track.Times.Length == 0 ||
-                    track.Values == null ||
-                    track.Values.Length == 0)
-                    continue;
-
-                switch (track.Path)
-                {
-                    case "translation":
-                    {
-                        float[] v;
-
-                        if (TrySample(track, time, 3, out v))
-                        {
-                            target.localPosition =
-                                new Vector3(v[0], v[1], v[2]);
-                        }
-
-                        break;
-                    }
-
-                    case "scale":
-                    {
-                        float[] v;
-
-                        if (TrySample(track, time, 3, out v))
-                        {
-                            target.localScale =
-                                new Vector3(v[0], v[1], v[2]);
-                        }
-
-                        break;
-                    }
-
-                    case "rotation":
-                    {
-                        Quaternion q;
-
-                        if (TrySampleRotation(track, time, out q))
-                            target.localRotation = q;
-
-                        break;
-                    }
-
-                    // "weights" requires morph-target support.
-                    // It is intentionally ignored by this player.
-                }
+                ModelAPI.UpdateCpuSkinning(_root);
+            }
+            catch (Exception)
+            {
+                // Models without CPU-skinned meshes need no extra work.
             }
         }
 
-        private bool TrySample(
-            GlbAnimationTrack track,
-            float time,
-            int requiredComponents,
-            out float[] result)
+        private void SampleAnimation(float time)
         {
-            result = null;
+            if (_currentAnimation == null)
+                return;
 
-            float[] times = track.Times;
-            float[] values = track.Values;
+            object tracksObject = GetMember(
+                _currentAnimation,
+                "Tracks", "tracks",
+                "Channels", "channels");
 
-            if (times == null || times.Length == 0 ||
-                values == null || values.Length == 0)
-                return false;
+            IEnumerable tracks = tracksObject as IEnumerable;
 
-            int components = track.ComponentsPerElement > 0
-                ? track.ComponentsPerElement
-                : requiredComponents;
+            if (tracks == null)
+                return;
 
-            if (components < requiredComponents)
-                return false;
-
-            bool cubic = IsInterpolation(track, "CUBICSPLINE");
-            bool step = IsInterpolation(track, "STEP");
-
-            int stride = components * (cubic ? 3 : 1);
-
-            if (values.Length < times.Length * stride)
+            foreach (object track in tracks)
             {
-                // A single-key animation can still be sampled safely.
-                if (times.Length == 1 &&
-                    values.Length >= requiredComponents)
+                if (track == null)
+                    continue;
+
+                int nodeIndex = GetInt(
+                    track,
+                    -1,
+                    "NodeIndex", "nodeIndex",
+                    "TargetNode", "targetNode");
+
+                if (nodeIndex < 0 ||
+                    nodeIndex >= _nodeTransforms.Length)
                 {
-                    int offset = cubic ? components : 0;
-
-                    if (offset + requiredComponents > values.Length)
-                        return false;
-
-                    result = new float[requiredComponents];
-
-                    Array.Copy(
-                        values,
-                        offset,
-                        result,
-                        0,
-                        requiredComponents);
-
-                    return true;
+                    continue;
                 }
 
-                return false;
-            }
+                Transform target = _nodeTransforms[nodeIndex];
 
-            int last = times.Length - 1;
+                if (target == null)
+                    continue;
+
+                string path = GetString(
+                    track,
+                    "Path", "path",
+                    "TargetPath", "targetPath");
+
+                string interpolation = GetString(
+                    track,
+                    "Interpolation", "interpolation");
+
+                float[] times = GetFloatArray(
+                    track,
+                    "Times", "times",
+                    "Input", "input");
+
+                float[] values = GetFloatArray(
+                    track,
+                    "Values", "values",
+                    "Output", "output");
+
+                if (times == null || times.Length == 0 ||
+                    values == null || values.Length == 0)
+                {
+                    continue;
+                }
+
+                int components = GetInt(
+                    track,
+                    GetDefaultComponents(path),
+                    "Components", "components",
+                    "ComponentCount", "componentCount",
+                    "ValuesPerKeyframe", "valuesPerKeyframe");
+
+                if (components <= 0)
+                    components = GetDefaultComponents(path);
+
+                SampleTrack(
+                    target,
+                    path,
+                    interpolation,
+                    times,
+                    values,
+                    components,
+                    time);
+            }
+        }
+
+        private static void SampleTrack(
+            Transform target,
+            string path,
+            string interpolation,
+            float[] times,
+            float[] values,
+            int components,
+            float time)
+        {
+            if (target == null || times.Length == 0)
+                return;
+
+            bool cubic = string.Equals(
+                interpolation,
+                "CUBICSPLINE",
+                StringComparison.OrdinalIgnoreCase);
+
+            bool step = string.Equals(
+                interpolation,
+                "STEP",
+                StringComparison.OrdinalIgnoreCase);
+
+            int keyCount = times.Length;
+
+            if (components <= 0)
+                components = GetDefaultComponents(path);
+
+            int first = 0;
+            int second = 0;
 
             if (time <= times[0])
-                return ReadKey(values, 0, components, cubic,
-                    requiredComponents, out result);
-
-            if (time >= times[last])
-                return ReadKey(values, last * stride, components, cubic,
-                    requiredComponents, out result);
-
-            int left = 0;
-
-            for (int i = 0; i < last; i++)
             {
-                if (time >= times[i] && time < times[i + 1])
+                first = second = 0;
+            }
+            else if (time >= times[keyCount - 1])
+            {
+                first = second = keyCount - 1;
+            }
+            else
+            {
+                for (int i = 0; i < keyCount - 1; i++)
                 {
-                    left = i;
-                    break;
+                    if (time >= times[i] && time <= times[i + 1])
+                    {
+                        first = i;
+                        second = i + 1;
+                        break;
+                    }
                 }
             }
 
-            int right = left + 1;
-            float t0 = times[left];
-            float t1 = times[right];
-            float dt = t1 - t0;
+            float segmentDuration = times[second] - times[first];
 
-            if (dt <= 0f)
-                return ReadKey(values, left * stride, components, cubic,
-                    requiredComponents, out result);
+            float t = segmentDuration > 0f
+                ? Mathf.Clamp01((time - times[first]) / segmentDuration)
+                : 0f;
 
-            if (step)
-                return ReadKey(values, left * stride, components, cubic,
-                    requiredComponents, out result);
+            if (step || first == second)
+                t = 0f;
 
-            float t = Mathf.Clamp01((time - t0) / dt);
-
-            result = new float[requiredComponents];
-
-            int leftOffset = left * stride;
-            int rightOffset = right * stride;
+            float[] result = new float[components];
 
             if (cubic)
             {
-                int leftValue = leftOffset + components;
-                int leftOutTangent = leftOffset + components * 2;
-                int rightInTangent = rightOffset;
-                int rightValue = rightOffset + components;
+                // glTF CUBICSPLINE stores three values per key:
+                // incoming tangent, key value, outgoing tangent.
+                int keyStride = components * 3;
 
-                float t2 = t * t;
-                float t3 = t2 * t;
+                int firstValueOffset = first * keyStride + components;
+                int secondValueOffset = second * keyStride + components;
 
-                float h00 = 2f * t3 - 3f * t2 + 1f;
-                float h10 = t3 - 2f * t2 + t;
-                float h01 = -2f * t3 + 3f * t2;
-                float h11 = t3 - t2;
+                int firstOutTangentOffset = first * keyStride
+                    + components * 2;
 
-                for (int c = 0; c < requiredComponents; c++)
+                int secondInTangentOffset = second * keyStride;
+
+                for (int c = 0; c < components; c++)
                 {
-                    float p0 = values[leftValue + c];
-                    float m0 = values[leftOutTangent + c];
-                    float p1 = values[rightValue + c];
-                    float m1 = values[rightInTangent + c];
+                    float p0 = ReadValue(
+                        values, firstValueOffset + c, 0f);
+
+                    float p1 = ReadValue(
+                        values, secondValueOffset + c, p0);
+
+                    if (step || first == second)
+                    {
+                        result[c] = p0;
+                        continue;
+                    }
+
+                    float m0 = ReadValue(
+                        values, firstOutTangentOffset + c, 0f);
+
+                    float m1 = ReadValue(
+                        values, secondInTangentOffset + c, 0f);
+
+                    float t2 = t * t;
+                    float t3 = t2 * t;
+
+                    float h00 = 2f * t3 - 3f * t2 + 1f;
+                    float h10 = t3 - 2f * t2 + t;
+                    float h01 = -2f * t3 + 3f * t2;
+                    float h11 = t3 - t2;
 
                     result[c] =
                         h00 * p0 +
-                        h10 * dt * m0 +
+                        h10 * segmentDuration * m0 +
                         h01 * p1 +
-                        h11 * dt * m1;
+                        h11 * segmentDuration * m1;
                 }
-
-                return true;
             }
-
-            for (int c = 0; c < requiredComponents; c++)
+            else
             {
-                result[c] = Mathf.LerpUnclamped(
-                    values[leftOffset + c],
-                    values[rightOffset + c],
-                    t);
-            }
+                int firstOffset = first * components;
+                int secondOffset = second * components;
 
-            return true;
-        }
-
-        private bool TrySampleRotation(
-            GlbAnimationTrack track,
-            float time,
-            out Quaternion result)
-        {
-            result = Quaternion.identity;
-
-            if (track == null ||
-                track.Times == null ||
-                track.Times.Length == 0)
-                return false;
-
-            if (IsInterpolation(track, "CUBICSPLINE") ||
-                IsInterpolation(track, "STEP") ||
-                track.Times.Length == 1)
-            {
-                float[] values;
-
-                if (!TrySample(track, time, 4, out values))
-                    return false;
-
-                result = NormalizeQuaternion(new Quaternion(
-                    values[0], values[1], values[2], values[3]));
-
-                return true;
-            }
-
-            float[] times = track.Times;
-            float[] valuesArray = track.Values;
-
-            int components = track.ComponentsPerElement > 0
-                ? track.ComponentsPerElement
-                : 4;
-
-            if (components < 4 ||
-                valuesArray.Length < times.Length * components)
-                return false;
-
-            int last = times.Length - 1;
-
-            if (time <= times[0])
-            {
-                result = ReadQuaternion(valuesArray, 0);
-                return true;
-            }
-
-            if (time >= times[last])
-            {
-                result = ReadQuaternion(
-                    valuesArray,
-                    last * components);
-
-                return true;
-            }
-
-            int left = 0;
-
-            for (int i = 0; i < last; i++)
-            {
-                if (time >= times[i] && time < times[i + 1])
+                for (int c = 0; c < components; c++)
                 {
-                    left = i;
-                    break;
+                    float a = ReadValue(
+                        values, firstOffset + c, 0f);
+
+                    float b = ReadValue(
+                        values, secondOffset + c, a);
+
+                    result[c] = step
+                        ? a
+                        : Mathf.LerpUnclamped(a, b, t);
                 }
             }
 
-            int right = left + 1;
-            float dt = times[right] - times[left];
+            ApplyValue(target, path, result);
+        }
 
-            if (dt <= 0f)
+        private static void ApplyValue(
+            Transform target,
+            string path,
+            float[] value)
+        {
+            if (target == null || value == null)
+                return;
+
+            if (string.Equals(
+                path, "translation",
+                StringComparison.OrdinalIgnoreCase))
             {
-                result = ReadQuaternion(
-                    valuesArray,
-                    left * components);
+                if (value.Length >= 3)
+                {
+                    target.localPosition = new Vector3(
+                        value[0], value[1], value[2]);
+                }
+            }
+            else if (string.Equals(
+                path, "scale",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                if (value.Length >= 3)
+                {
+                    target.localScale = new Vector3(
+                        value[0], value[1], value[2]);
+                }
+            }
+            else if (string.Equals(
+                path, "rotation",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                if (value.Length >= 4)
+                {
+                    Quaternion rotation = new Quaternion(
+                        value[0], value[1], value[2], value[3]);
 
-                return true;
+                    float magnitude = Mathf.Sqrt(
+                        rotation.x * rotation.x +
+                        rotation.y * rotation.y +
+                        rotation.z * rotation.z +
+                        rotation.w * rotation.w);
+
+                    if (magnitude > 0.000001f)
+                    {
+                        rotation.x /= magnitude;
+                        rotation.y /= magnitude;
+                        rotation.z /= magnitude;
+                        rotation.w /= magnitude;
+                    }
+                    else
+                    {
+                        rotation = Quaternion.identity;
+                    }
+
+                    target.localRotation = rotation;
+                }
+            }
+        }
+
+        private static int GetDefaultComponents(string path)
+        {
+            if (string.Equals(
+                path, "rotation",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return 4;
             }
 
-            float t = Mathf.Clamp01(
-                (time - times[left]) / dt);
+            if (string.Equals(
+                path, "translation",
+                StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                path, "scale",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return 3;
+            }
 
-            result = Quaternion.Slerp(
-                ReadQuaternion(valuesArray, left * components),
-                ReadQuaternion(valuesArray, right * components),
-                t);
-
-            return true;
+            return 1;
         }
 
-        private bool ReadKey(
-            float[] values,
-            int keyOffset,
-            int components,
-            bool cubic,
-            int requiredComponents,
-            out float[] result)
-        {
-            result = null;
-
-            int offset = cubic
-                ? keyOffset + components
-                : keyOffset;
-
-            if (offset < 0 ||
-                offset + requiredComponents > values.Length)
-                return false;
-
-            result = new float[requiredComponents];
-
-            Array.Copy(
-                values,
-                offset,
-                result,
-                0,
-                requiredComponents);
-
-            return true;
-        }
-
-        private Quaternion ReadQuaternion(float[] values, int offset)
-        {
-            if (values == null ||
-                offset < 0 ||
-                offset + 4 > values.Length)
-                return Quaternion.identity;
-
-            return NormalizeQuaternion(new Quaternion(
-                values[offset],
-                values[offset + 1],
-                values[offset + 2],
-                values[offset + 3]));
-        }
-
-        private Quaternion NormalizeQuaternion(Quaternion q)
-        {
-            float magnitude = Mathf.Sqrt(
-                q.x * q.x +
-                q.y * q.y +
-                q.z * q.z +
-                q.w * q.w);
-
-            if (magnitude <= 0.000001f)
-                return Quaternion.identity;
-
-            float inverse = 1f / magnitude;
-
-            return new Quaternion(
-                q.x * inverse,
-                q.y * inverse,
-                q.z * inverse,
-                q.w * inverse);
-        }
-
-        private bool IsInterpolation(
-            GlbAnimationTrack track,
-            string interpolation)
-        {
-            return string.Equals(
-                track.Interpolation,
-                interpolation,
-                StringComparison.OrdinalIgnoreCase);
-        }
-
-        private float GetDuration(GlbAnimationData animation)
+        private float GetDuration(object animation)
         {
             if (animation == null)
                 return 0f;
 
-            float duration = Mathf.Max(0f, animation.Duration);
+            object tracksObject = GetMember(
+                animation,
+                "Tracks", "tracks",
+                "Channels", "channels");
 
-            if (animation.Tracks == null)
-                return duration;
+            IEnumerable tracks = tracksObject as IEnumerable;
 
-            for (int i = 0; i < animation.Tracks.Length; i++)
+            if (tracks == null)
+                return 0f;
+
+            float duration = 0f;
+
+            foreach (object track in tracks)
             {
-                GlbAnimationTrack track = animation.Tracks[i];
+                float[] times = GetFloatArray(
+                    track,
+                    "Times", "times",
+                    "Input", "input");
 
-                if (track == null || track.Times == null)
-                    continue;
-
-                for (int j = 0; j < track.Times.Length; j++)
+                if (times != null && times.Length > 0)
                 {
-                    duration = Mathf.Max(duration, track.Times[j]);
+                    float last = times[times.Length - 1];
+
+                    if (last > duration)
+                        duration = last;
                 }
             }
 
             return duration;
         }
 
-        private void RestoreOriginalTransforms()
+        private static object GetMember(object instance, params string[] names)
         {
-            for (int i = 0; i < _nodeTransforms.Length; i++)
+            if (instance == null)
+                return null;
+
+            Type type = instance.GetType();
+
+            for (int i = 0; i < names.Length; i++)
             {
-                Transform node = _nodeTransforms[i];
+                FieldInfo field = type.GetField(
+                    names[i],
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic);
 
-                if (node == null)
-                    continue;
+                if (field != null)
+                    return field.GetValue(instance);
 
-                node.localPosition = _originalPositions[i];
-                node.localRotation = _originalRotations[i];
-                node.localScale = _originalScales[i];
+                PropertyInfo property = type.GetProperty(
+                    names[i],
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic);
+
+                if (property != null && property.CanRead)
+                    return property.GetValue(instance, null);
             }
+
+            return null;
+        }
+
+        private static string GetString(
+            object instance,
+            params string[] names)
+        {
+            object value = GetMember(instance, names);
+            return value as string ?? string.Empty;
+        }
+
+        private static int GetInt(
+            object instance,
+            int fallback,
+            params string[] names)
+        {
+            object value = GetMember(instance, names);
+
+            if (value == null)
+                return fallback;
+
+            try
+            {
+                return Convert.ToInt32(value);
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        private static float[] GetFloatArray(
+            object instance,
+            params string[] names)
+        {
+            object value = GetMember(instance, names);
+
+            if (value == null)
+                return null;
+
+            float[] direct = value as float[];
+
+            if (direct != null)
+                return direct;
+
+            IEnumerable enumerable = value as IEnumerable;
+
+            if (enumerable == null)
+                return null;
+
+            List<float> result = new List<float>();
+
+            foreach (object item in enumerable)
+            {
+                try
+                {
+                    result.Add(Convert.ToSingle(item));
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            return result.ToArray();
+        }
+
+        private static float ReadValue(
+            float[] values,
+            int index,
+            float fallback)
+        {
+            if (values == null ||
+                index < 0 ||
+                index >= values.Length)
+            {
+                return fallback;
+            }
+
+            return values[index];
         }
     }
 }
