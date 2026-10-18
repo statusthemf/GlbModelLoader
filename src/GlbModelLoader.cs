@@ -435,7 +435,6 @@ namespace ULTRADROID.Models
 
             int count = doc.json.nodes.Length;
 
-            // Create one Unity object per glTF node.
             GameObject[] nodeObjects = new GameObject[count];
             Transform[] nodeTransforms = new Transform[count];
 
@@ -449,9 +448,6 @@ namespace ULTRADROID.Models
                     doc, index, root, nodeObjects, nodeTransforms, guard);
             }
 
-            // Ensure unreferenced nodes also get objects.
-            // This is important when a skin references joints that are
-            // not part of the selected scene's ordinary hierarchy.
             for (int i = 0; i < count; i++)
             {
                 if (nodeObjects[i] == null)
@@ -461,7 +457,6 @@ namespace ULTRADROID.Models
                 }
             }
 
-            // All joint transforms now exist. Build meshes afterward.
             for (int i = 0; i < count; i++)
             {
                 GltfNode node = doc.json.nodes[i];
@@ -608,9 +603,7 @@ namespace ULTRADROID.Models
                 Quaternion rotation;
                 Vector3 scale;
 
-                // Unity can decompose a matrix into these components.
                 position = matrix.GetColumn(3);
-
                 rotation = matrix.rotation;
                 scale = matrix.lossyScale;
 
@@ -648,11 +641,9 @@ namespace ULTRADROID.Models
         }
 
         // ------------------------------------------------------------
-        // VARIABLE-INFLUENCE BONE WEIGHTS (replaces legacy BoneWeight)
+        // VARIABLE-INFLUENCE BONE WEIGHTS
         // ------------------------------------------------------------
 
-        // Native-compatible layout used by Unity's BoneWeight1:
-        // 4-byte bone index followed by a 4-byte float weight.
         [StructLayout(LayoutKind.Sequential, Pack = 4)]
         private struct GlbBoneWeight1
         {
@@ -711,8 +702,6 @@ namespace ULTRADROID.Models
                 weightsHandle = GCHandle.Alloc(
                     flattenedWeights, GCHandleType.Pinned);
 
-                // The IL2CPP wrapper takes pointers and element counts.
-                // Keep both managed arrays pinned until the native call returns.
                 mesh.InternalSetBoneWeights(
                     countsHandle.AddrOfPinnedObject(),
                     vertexCounts.Length,
@@ -900,7 +889,6 @@ namespace ULTRADROID.Models
                             int influenceCount = 0;
                             float totalWeight = 0f;
 
-                            // First pass: validate and total the usable influences.
                             for (int j = 0; j < 4; j++)
                             {
                                 float weight = weights[offset + j];
@@ -923,7 +911,6 @@ namespace ULTRADROID.Models
                                 influenceCount++;
                             }
 
-                            // Every vertex must have at least one influence.
                             if (influenceCount == 0 || totalWeight <= 0.000001f)
                             {
                                 bonesPerVertex.Add(1);
@@ -931,9 +918,6 @@ namespace ULTRADROID.Models
                                 continue;
                             }
 
-                            // Second pass: store only non-zero influences and normalize
-                            // their weights. The counts array describes how many entries
-                            // belong to each vertex in the flattened array.
                             for (int j = 0; j < 4; j++)
                             {
                                 float weight = weights[offset + j];
@@ -1057,16 +1041,40 @@ namespace ULTRADROID.Models
                 mesh.SetUVs(0, ilUv);
             }
 
-            if (skinned && hasBoneWeights &&
-                bonesPerVertex.Count == vertices.Count)
-            {
-                SetBoneWeightsCompat(
-                    mesh,
-                    bonesPerVertex,
-                    allBoneWeights);
+            // ---------- SAFE SKIN / FALLBACK BLOCK ----------
+            bool skinDataReady =
+                skinned &&
+                hasBoneWeights &&
+                bonesPerVertex.Count == vertices.Count;
 
+            bool skinWeightsApplied = false;
+
+            if (skinDataReady)
+            {
+                try
+                {
+                    SetBoneWeightsCompat(
+                        mesh,
+                        bonesPerVertex,
+                        allBoneWeights);
+
+                    skinWeightsApplied = true;
+                }
+                catch (Exception ex)
+                {
+                    LogError(
+                        "Native bone-weight assignment failed. " +
+                        "Falling back to a static mesh for '" +
+                        gameObject.name + "'.",
+                        ex);
+                }
+            }
+
+            if (skinWeightsApplied)
+            {
                 Matrix4x4[] bindPoses =
-                    BuildBindPoses(doc, skin, bones, gameObject.transform);
+                    BuildBindPoses(
+                        doc, skin, bones, gameObject.transform);
 
                 mesh.bindposes =
                     new Il2CppStructArray<Matrix4x4>(bindPoses);
@@ -1077,6 +1085,7 @@ namespace ULTRADROID.Models
                     gameObject.AddComponent<SkinnedMeshRenderer>();
 
                 renderer.sharedMesh = mesh;
+
                 renderer.bones =
                     new Il2CppReferenceArray<Transform>(bones);
 
@@ -1088,8 +1097,6 @@ namespace ULTRADROID.Models
 
                 if (options.CreateColliders)
                 {
-                    // MeshCollider does not deform with the skeleton.
-                    // This collider uses the mesh's original pose.
                     MeshCollider collider =
                         gameObject.AddComponent<MeshCollider>();
 
@@ -1098,13 +1105,13 @@ namespace ULTRADROID.Models
             }
             else
             {
-                if (skinned)
+                if (skinned && !skinDataReady)
                 {
                     LogError(
                         "Node '" + gameObject.name +
-                        "' has a skin but one or more primitives are " +
-                        "missing valid JOINTS_0/WEIGHTS_0 data. " +
-                        "Loading it as a static mesh.", null);
+                        "' has a skin but valid JOINTS_0/WEIGHTS_0 " +
+                        "data is unavailable. Loading as a static mesh.",
+                        null);
                 }
 
                 mesh.RecalculateBounds();
@@ -1149,7 +1156,6 @@ namespace ULTRADROID.Models
             Transform[] bones,
             Transform meshTransform)
         {
-            // Prefer the GLB's inverse bind matrices when supplied.
             if (skin.inverseBindMatrices >= 0)
             {
                 Matrix4x4[] matrices =
@@ -1165,7 +1171,6 @@ namespace ULTRADROID.Models
                 return matrices;
             }
 
-            // Fallback for skins without inverseBindMatrices.
             Matrix4x4[] result = new Matrix4x4[bones.Length];
 
             for (int i = 0; i < bones.Length; i++)
