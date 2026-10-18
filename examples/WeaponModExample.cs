@@ -194,9 +194,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                     AnimationName +
                     "' could not be started. Check the animation name.");
 
-                LogInfo(
-                    "Available animation count: " +
-                    _animationPlayer.AnimationCount);
+                LogInfo("Animation player was created successfully.");
             }
             else
             {
