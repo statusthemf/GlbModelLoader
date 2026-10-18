@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using BepInEx.Logging;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
@@ -647,6 +648,88 @@ namespace ULTRADROID.Models
         }
 
         // ------------------------------------------------------------
+        // VARIABLE-INFLUENCE BONE WEIGHTS (replaces legacy BoneWeight)
+        // ------------------------------------------------------------
+
+        // Native-compatible layout used by Unity's BoneWeight1:
+        // 4-byte bone index followed by a 4-byte float weight.
+        [StructLayout(LayoutKind.Sequential, Pack = 4)]
+        private struct GlbBoneWeight1
+        {
+            public int boneIndex;
+            public float weight;
+
+            public GlbBoneWeight1(int boneIndex, float weight)
+            {
+                this.boneIndex = boneIndex;
+                this.weight = weight;
+            }
+        }
+
+        private static void SetBoneWeightsCompat(
+            Mesh mesh,
+            List<byte> bonesPerVertex,
+            List<GlbBoneWeight1> allBoneWeights)
+        {
+            if (mesh == null)
+                throw new ArgumentNullException(nameof(mesh));
+
+            if (bonesPerVertex == null)
+                throw new ArgumentNullException(nameof(bonesPerVertex));
+
+            if (allBoneWeights == null)
+                throw new ArgumentNullException(nameof(allBoneWeights));
+
+            if (bonesPerVertex.Count != mesh.vertexCount)
+            {
+                throw new InvalidDataException(
+                    "Bone influence counts do not match the mesh vertex count.");
+            }
+
+            long expectedWeightCount = 0;
+
+            foreach (byte count in bonesPerVertex)
+                expectedWeightCount += count;
+
+            if (expectedWeightCount != allBoneWeights.Count)
+            {
+                throw new InvalidDataException(
+                    "Bone influence counts do not match the flattened weight array.");
+            }
+
+            byte[] vertexCounts = bonesPerVertex.ToArray();
+            GlbBoneWeight1[] flattenedWeights = allBoneWeights.ToArray();
+
+            GCHandle countsHandle = default(GCHandle);
+            GCHandle weightsHandle = default(GCHandle);
+
+            try
+            {
+                countsHandle = GCHandle.Alloc(
+                    vertexCounts, GCHandleType.Pinned);
+
+                weightsHandle = GCHandle.Alloc(
+                    flattenedWeights, GCHandleType.Pinned);
+
+                // The IL2CPP wrapper takes pointers and element counts.
+                // Keep both managed arrays pinned until the native call returns.
+                mesh.InternalSetBoneWeights(
+                    countsHandle.AddrOfPinnedObject(),
+                    vertexCounts.Length,
+                    weightsHandle.AddrOfPinnedObject(),
+                    flattenedWeights.Length);
+            }
+            finally
+            {
+                if (weightsHandle.IsAllocated)
+                    weightsHandle.Free();
+
+                if (countsHandle.IsAllocated)
+                    countsHandle.Free();
+            }
+        }
+
+        // ------------------------------------------------------------
         // MESH BUILDING, INCLUDING SKINNED MESHES
         // ------------------------------------------------------------
 
@@ -714,7 +797,9 @@ namespace ULTRADROID.Models
             List<Vector3> vertices = new List<Vector3>();
             List<Vector3> normals = new List<Vector3>();
             List<Vector2> uv = new List<Vector2>();
-            List<BoneWeight> boneWeights = new List<BoneWeight>();
+            List<byte> bonesPerVertex = new List<byte>();
+            List<GlbBoneWeight1> allBoneWeights =
+                new List<GlbBoneWeight1>();
 
             List<List<int>> submeshTriangles =
                 new List<List<int>>();
@@ -810,48 +895,61 @@ namespace ULTRADROID.Models
 
                         for (int v = 0; v < vertexCount; v++)
                         {
-                            BoneWeight bw = new BoneWeight();
+                            int offset = v * 4;
 
-                            bw.boneIndex0 = joints[v * 4];
-                            bw.boneIndex1 = joints[v * 4 + 1];
-                            bw.boneIndex2 = joints[v * 4 + 2];
-                            bw.boneIndex3 = joints[v * 4 + 3];
+                            int influenceCount = 0;
+                            float totalWeight = 0f;
 
-                            bw.weight0 = weights[v * 4];
-                            bw.weight1 = weights[v * 4 + 1];
-                            bw.weight2 = weights[v * 4 + 2];
-                            bw.weight3 = weights[v * 4 + 3];
-
-                            float total =
-                                bw.weight0 + bw.weight1 +
-                                bw.weight2 + bw.weight3;
-
-                            if (total > 0.000001f)
+                            // First pass: validate and total the usable influences.
+                            for (int j = 0; j < 4; j++)
                             {
-                                bw.weight0 /= total;
-                                bw.weight1 /= total;
-                                bw.weight2 /= total;
-                                bw.weight3 /= total;
-                            }
-                            else
-                            {
-                                bw.boneIndex0 = 0;
-                                bw.boneIndex1 = 0;
-                                bw.boneIndex2 = 0;
-                                bw.boneIndex3 = 0;
+                                float weight = weights[offset + j];
 
-                                bw.weight0 = 1f;
-                                bw.weight1 = 0f;
-                                bw.weight2 = 0f;
-                                bw.weight3 = 0f;
+                                if (float.IsNaN(weight) ||
+                                    float.IsInfinity(weight) ||
+                                    weight < 0f)
+                                {
+                                    throw new InvalidDataException(
+                                        "Vertex contains an invalid bone weight.");
+                                }
+
+                                if (weight <= 0f)
+                                    continue;
+
+                                int boneIndex = joints[offset + j];
+                                ValidateBoneIndex(boneIndex, bones.Length);
+
+                                totalWeight += weight;
+                                influenceCount++;
                             }
 
-                            ValidateBoneIndex(bw.boneIndex0, bones.Length);
-                            ValidateBoneIndex(bw.boneIndex1, bones.Length);
-                            ValidateBoneIndex(bw.boneIndex2, bones.Length);
-                            ValidateBoneIndex(bw.boneIndex3, bones.Length);
+                            // Every vertex must have at least one influence.
+                            if (influenceCount == 0 || totalWeight <= 0.000001f)
+                            {
+                                bonesPerVertex.Add(1);
+                                allBoneWeights.Add(new GlbBoneWeight1(0, 1f));
+                                continue;
+                            }
 
-                            boneWeights.Add(bw);
+                            // Second pass: store only non-zero influences and normalize
+                            // their weights. The counts array describes how many entries
+                            // belong to each vertex in the flattened array.
+                            for (int j = 0; j < 4; j++)
+                            {
+                                float weight = weights[offset + j];
+
+                                if (weight <= 0f)
+                                    continue;
+
+                                int boneIndex = joints[offset + j];
+
+                                allBoneWeights.Add(
+                                    new GlbBoneWeight1(
+                                        boneIndex,
+                                        weight / totalWeight));
+                            }
+
+                            bonesPerVertex.Add((byte)influenceCount);
                         }
                     }
                 }
@@ -960,11 +1058,12 @@ namespace ULTRADROID.Models
             }
 
             if (skinned && hasBoneWeights &&
-                boneWeights.Count == vertices.Count)
+                bonesPerVertex.Count == vertices.Count)
             {
-                mesh.boneWeights =
-                    new Il2CppStructArray<BoneWeight>(
-                        boneWeights.ToArray());
+                SetBoneWeightsCompat(
+                    mesh,
+                    bonesPerVertex,
+                    allBoneWeights);
 
                 Matrix4x4[] bindPoses =
                     BuildBindPoses(doc, skin, bones, gameObject.transform);
