@@ -1,3 +1,4 @@
+
 using Il2CppInterop.Runtime.Injection;
 using System;
 using System.Collections.Generic;
@@ -9,15 +10,16 @@ using ULTRADROID.API;
 using ULTRADROID.Models;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using UnityEngine.Events;
 
 [BepInPlugin(
     "ultradroid.bladesofchaos",
     "ULTRADROID Blades of Chaos",
-    "0.8.0")]
+    "0.8.1")]
+
 [BepInDependency(
     ULTRADROIDControls.PluginGuid,
     BepInDependency.DependencyFlags.HardDependency)]
+
 public sealed class BladesOfChaosPlugin : BasePlugin
 {
     public override void Load()
@@ -40,7 +42,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
     private GameObject _modelRoot;
     private GlbAnimationPlayer _player;
-    private GlbAnimationData[] _animations = new GlbAnimationData[0];
+
+    private GlbAnimationData[] _animations =
+        new GlbAnimationData[0];
 
     private readonly List<ButtonHandle> _buttons =
         new List<ButtonHandle>();
@@ -50,6 +54,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     private bool _buttonsCreated;
     private bool _loop = true;
     private int _selectedIndex;
+    private float _playbackSpeed = 1f;
 
     public BladesOfChaosRunner(IntPtr ptr) : base(ptr)
     {
@@ -59,27 +64,45 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     {
         string scene = SceneManager.GetActiveScene().name;
 
+        // Handle scene changes before trying to load the model.
         if (!string.Equals(scene, _lastScene, StringComparison.Ordinal))
         {
             _lastScene = scene;
-            ClearModel();
+
             RemoveButtons();
+            ClearModel();
+
             _nextRetry = 0f;
+
+            LogInfo("Scene changed: " + scene);
+
+            if (!IsMenu(scene))
+            {
+                // Controls must not depend on successful model loading.
+                CreateButtons();
+            }
         }
 
         if (IsMenu(scene))
             return;
 
-        if (_modelRoot == null && Time.unscaledTime >= _nextRetry)
+        // Retry model loading independently of button registration.
+        if (_modelRoot == null &&
+            Time.unscaledTime >= _nextRetry)
         {
             _nextRetry = Time.unscaledTime + RetryInterval;
             TryLoadModel();
         }
 
+        // GlbAnimationPlayer.Update already handles CPU skinning.
         if (_player != null)
+        {
             _player.Update(Time.deltaTime);
+        }
         else if (_modelRoot != null)
+        {
             ModelAPI.UpdateCpuSkinning(_modelRoot);
+        }
     }
 
     private static bool IsMenu(string scene)
@@ -116,7 +139,8 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
             for (int i = 0; cameras != null && i < cameras.Length; i++)
             {
-                if (cameras[i] != null && cameras[i].isActiveAndEnabled)
+                if (cameras[i] != null &&
+                    cameras[i].isActiveAndEnabled)
                 {
                     camera = cameras[i];
                     break;
@@ -159,26 +183,34 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             }
 
             _modelRoot.name = "ULTRADROID_BladesOfChaos";
-            _modelRoot.transform.localPosition = new Vector3(0f, 0f, 1f);
-            _modelRoot.transform.localRotation = Quaternion.identity;
-            _modelRoot.transform.localScale = new Vector3(0.1f, 0.1f, 0.1f);
+
+            _modelRoot.transform.localPosition =
+                new Vector3(0f, 0f, 1f);
+
+            _modelRoot.transform.localRotation =
+                Quaternion.identity;
+
+            _modelRoot.transform.localScale =
+                new Vector3(0.1f, 0.1f, 0.1f);
 
             _player = ModelAPI.GetAnimationPlayer(_modelRoot);
 
             if (_player == null)
             {
-                LogWarning("Model loaded, but no animation player was registered.");
+                LogWarning(
+                    "Model loaded, but no animation player was registered.");
                 return;
             }
 
             _selectedIndex = FindPreferredClip("Bow");
-            _player.PlaybackSpeed = 1f;
             _loop = true;
+            _playbackSpeed = 1f;
+
+            _player.PlaybackSpeed = _playbackSpeed;
+            _player.Loop = _loop;
 
             if (_animations.Length > 0)
                 PlaySelected();
-
-            CreateButtons();
 
             LogInfo("Model and animation player initialized.");
         }
@@ -187,7 +219,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             LogError("Initialization failed: " + ex);
 
             ClearModel();
-            RemoveButtons();
         }
     }
 
@@ -199,7 +230,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 _animations[i].Name,
                 preferred,
                 StringComparison.OrdinalIgnoreCase))
+            {
                 return i;
+            }
         }
 
         return 0;
@@ -212,15 +245,23 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         _buttonsCreated = true;
 
-        // Small row placed near the bottom-right area.
-        // PositionOffset follows the coordinate convention of Controls API.
-        AddControl("Prev", -250f, 100f, PreviousAnimation);
-        AddControl("Play", -150f, 100f, PlaySelected);
-        AddControl("Pause", -50f, 100f, PauseAnimation);
-        AddControl("Stop", 50f, 100f, StopAnimation);
-        AddControl("Next", 150f, 100f, NextAnimation);
-        AddControl("1.0x", 250f, 100f, ChangeSpeed);
-        AddControl("Loop", 150f, 190f, ToggleLoop);
+        LogInfo("Registering animation controls.");
+
+        // Compact two-row cluster. The offsets are based on the
+        // working Controls API demo's positive-coordinate convention.
+        const float x0 = 120f;
+        const float y0 = 90f;
+        const float dx = 65f;
+        const float dy = 58f;
+
+        AddControl("Prev", x0,          y0,       PreviousAnimation);
+        AddControl("Play", x0 + dx,     y0,       PlaySelected);
+        AddControl("Pause", x0 + dx*2f, y0,       PauseAnimation);
+        AddControl("Stop", x0 + dx*3f,  y0,       StopAnimation);
+
+        AddControl("Next", x0,          y0 + dy,  NextAnimation);
+        AddControl("Speed", x0 + dx,    y0 + dy,  ChangeSpeed);
+        AddControl("Loop", x0 + dx*2f,  y0 + dy,  ToggleLoop);
     }
 
     private void AddControl(
@@ -229,30 +270,52 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         float y,
         Action callback)
     {
-        ButtonHandle handle = ULTRADROIDControls.AddButton(
-            new ButtonConfig
+        try
+        {
+            ButtonHandle handle = ULTRADROIDControls.AddButton(
+                new ButtonConfig
+                {
+                    Id = "ULTRADROID.Blades.Animation." + label,
+                    Label = label,
+                    PositionOffset = new Vector2(x, y),
+                    ApplyTint = false,
+                    ScaleMultiplier = 0.55f,
+                    OnClick = callback
+                });
+
+            if (handle != null)
             {
-                Id = "ULTRADROID.Blades.Animation." + label,
-                Label = label,
-                PositionOffset = new Vector2(x, y),
-                ApplyTint = false,
-                ScaleMultiplier = 0.65f,
-                OnClick = callback
-            });
-
-        if (handle != null)
-            _buttons.Add(handle);
-
-        LogInfo("Requested control: " + label);
+                _buttons.Add(handle);
+                LogInfo("Registered control: " + label);
+            }
+            else
+            {
+                LogWarning(
+                    "Controls API returned a null handle for " + label);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError(
+                "Failed to register control " + label + ": " + ex);
+        }
     }
 
     private void PlaySelected()
     {
         if (_player == null || _animations.Length == 0)
+        {
+            LogWarning("Play unavailable: animation player not ready.");
             return;
+        }
 
-        if (_selectedIndex < 0 || _selectedIndex >= _animations.Length)
+        if (_selectedIndex < 0 ||
+            _selectedIndex >= _animations.Length)
+        {
             _selectedIndex = 0;
+        }
+
+        _player.PlaybackSpeed = _playbackSpeed;
 
         bool success = _player.Play(_selectedIndex, _loop);
 
@@ -265,7 +328,10 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     private void PauseAnimation()
     {
         if (_player == null)
+        {
+            LogWarning("Pause unavailable: animation player not ready.");
             return;
+        }
 
         if (_player.IsPaused)
         {
@@ -279,17 +345,20 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         }
         else
         {
-            LogInfo("Animation is stopped. Tap Play to start.");
+            LogInfo("Animation stopped. Tap Play to start.");
         }
     }
 
     private void StopAnimation()
     {
         if (_player == null)
+        {
+            LogWarning("Stop unavailable: animation player not ready.");
             return;
+        }
 
         _player.Stop();
-        LogInfo("Stopped: " + _player.CurrentAnimationName);
+        LogInfo("Stopped animation.");
     }
 
     private void PreviousAnimation()
@@ -305,11 +374,18 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     private void SelectRelative(int direction)
     {
         if (_animations.Length == 0)
+        {
+            LogWarning("No animation clips available yet.");
             return;
+        }
 
         _selectedIndex =
             (_selectedIndex + direction + _animations.Length)
             % _animations.Length;
+
+        LogInfo(
+            "Selected clip [" + _selectedIndex + "]: " +
+            (_animations[_selectedIndex].Name ?? "(unnamed)"));
 
         PlaySelected();
     }
@@ -317,16 +393,21 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
     private void ChangeSpeed()
     {
         if (_player == null)
+        {
+            LogWarning("Speed unavailable: animation player not ready.");
             return;
+        }
 
-        float speed = _player.PlaybackSpeed + 0.25f;
+        _playbackSpeed += 0.25f;
 
-        if (speed > 2f)
-            speed = 0.25f;
+        if (_playbackSpeed > 2f)
+            _playbackSpeed = 0.25f;
 
-        _player.PlaybackSpeed = speed;
+        _player.PlaybackSpeed = _playbackSpeed;
 
-        LogInfo("Playback speed: " + speed.ToString("0.00") + "x");
+        LogInfo(
+            "Playback speed: " +
+            _playbackSpeed.ToString("0.00") + "x");
     }
 
     private void ToggleLoop()
@@ -362,7 +443,10 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         try
         {
             candidates.Add(Path.Combine(Paths.PluginPath, ModelFileName));
-            candidates.Add(Path.Combine(Paths.PluginPath, "BladesOfChaos", ModelFileName));
+            candidates.Add(Path.Combine(
+                Paths.PluginPath,
+                "BladesOfChaos",
+                ModelFileName));
         }
         catch
         {
@@ -391,8 +475,9 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             {
                 _buttons[i]?.Dispose();
             }
-            catch
+            catch (Exception ex)
             {
+                LogWarning("Button cleanup failed: " + ex.Message);
             }
         }
 
@@ -408,6 +493,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         _modelRoot = null;
         _player = null;
         _animations = new GlbAnimationData[0];
+        _selectedIndex = 0;
     }
 
     public void OnDestroy()
