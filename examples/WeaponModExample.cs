@@ -86,12 +86,16 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             return;
         }
 
-        // Animation playback is handled by the Models API.
+        // GlbAnimationPlayer.Update() already updates CPU skinning.
         if (_animationPlayer != null)
+        {
             _animationPlayer.Update(Time.deltaTime);
-
-        // Maintain meshes using the CPU-skinning fallback.
-        ModelAPI.UpdateCpuSkinning(_modelRoot);
+        }
+        else
+        {
+            // Preserve CPU skinning when no animation player exists.
+            ModelAPI.UpdateCpuSkinning(_modelRoot);
+        }
     }
 
     private static bool IsNonGameplayScene(string sceneName)
@@ -184,6 +188,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                     "The model loaded, but no animation player " +
                     "was registered. The model will remain visible.");
 
+                LogInfo("GLB model loaded successfully.");
                 return;
             }
 
@@ -194,15 +199,15 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                     AnimationName +
                     "' could not be started. Check the animation name.");
 
-                LogInfo("Animation player was created successfully.");
+                LogInfo(
+                    "Animation player was created successfully.");
             }
             else
             {
-            
                 LogInfo(
                     "Animation '" + AnimationName +
                     "' started successfully.");
-        }
+            }
 
             LogInfo("GLB model loaded successfully.");
         }
