@@ -46,12 +46,10 @@ jobs:
 
       - name: Check ULTRADROID dependencies
         run: |
-          for file in ULTRADROID.API.dll ULTRADROID.Core.dll; do
-            if [ ! -f "$file" ]; then
-              echo "::error::Missing required dependency: $file"
-              exit 1
-            fi
-          done
+          if [ ! -f "ULTRADROID.Core.dll" ]; then
+            echo "::error::Missing required dependency: ULTRADROID.Core.dll"
+            exit 1
+          fi
 
       - name: Verify example project exists
         run: |
@@ -64,13 +62,13 @@ jobs:
             exit 1
           fi
 
-      - name: Restore example and API
+      - name: Restore example project
         run: |
           dotnet restore examples/ExampleMod.csproj \
             --source https://api.nuget.org/v3/index.json \
             --source https://nuget.bepinex.dev/v3/index.json
 
-      - name: Build API and weapon plugin
+      - name: Build Models API and weapon plugin
         run: |
           dotnet build examples/ExampleMod.csproj \
             --configuration Release \
@@ -80,13 +78,11 @@ jobs:
         run: |
           test -f bin/Release/net10.0/ULTRADROID.Models.dll
           test -f examples/bin/Release/net10.0/WeaponModExample.dll
-          test -f ULTRADROID.API.dll
           test -f ULTRADROID.Core.dll
 
           echo "Build outputs:"
           ls -lh bin/Release/net10.0/ULTRADROID.Models.dll
           ls -lh examples/bin/Release/net10.0/WeaponModExample.dll
-          ls -lh ULTRADROID.API.dll
           ls -lh ULTRADROID.Core.dll
 
       - name: Upload plugins and dependencies
@@ -97,5 +93,4 @@ jobs:
           path: |
             bin/Release/net10.0/ULTRADROID.Models.dll
             examples/bin/Release/net10.0/WeaponModExample.dll
-            ULTRADROID.API.dll
             ULTRADROID.Core.dll
