@@ -20,7 +20,6 @@ namespace ULTRADROID.Models
         public bool FlipUvV = true;
     }
 
-    // Public animation data exposed to other ULTRADROID plugins.
     [Serializable]
     public sealed class GlbAnimationData
     {
@@ -35,17 +34,15 @@ namespace ULTRADROID.Models
         public int TargetNode = -1;
         public string Path;
         public string Interpolation = "LINEAR";
-
         public float[] Times;
         public float[] Values;
-
         public int ComponentsPerElement;
         public int ValuesPerKeyframe;
     }
 
     public static class ModelAPI
     {
-        public const string Version = "0.1.16-per-model-uvflip";
+        public const string Version = "0.1.17-skinning";
 
         internal static readonly ManualLogSource DiagnosticLog =
             BepInEx.Logging.Logger.CreateLogSource(
@@ -54,10 +51,10 @@ namespace ULTRADROID.Models
         private static void LogError(string message, Exception ex)
         {
             DiagnosticLog.LogError(
-                "[ULTRADROID Models] " + message + "\n" + ex);
+                "[ULTRADROID Models] " + message +
+                (ex == null ? "" : "\n" + ex));
         }
 
-        // Reads animation data without creating a Unity model.
         public static GlbAnimationData[] ReadGLBAnimations(string path)
         {
             if (string.IsNullOrEmpty(path))
@@ -97,16 +94,15 @@ namespace ULTRADROID.Models
 
             options = options ?? new ModelLoadOptions();
 
-            byte[] fileBytes = File.ReadAllBytes(path);
             GlbDocument doc;
 
             try
             {
-                doc = GlbDocument.Parse(fileBytes);
+                doc = GlbDocument.Parse(File.ReadAllBytes(path));
             }
             catch (Exception ex)
             {
-                LogError("GLB parsing failed", ex);
+                LogError("GLB parsing failed.", ex);
                 throw;
             }
 
@@ -135,19 +131,13 @@ namespace ULTRADROID.Models
                 Material[] materials =
                     BuildMaterials(doc, textures);
 
-                BuildScene(
-                    doc,
-                    root.transform,
-                    materials,
-                    options);
+                BuildScene(doc, root.transform, materials, options);
 
                 return root;
             }
             catch (Exception ex)
             {
-                LogError(
-                    "LoadGLB failed while building the model", ex);
-
+                LogError("LoadGLB failed while building the model.", ex);
                 UnityEngine.Object.Destroy(root);
                 throw;
             }
@@ -172,12 +162,7 @@ namespace ULTRADROID.Models
             {
                 GltfImage image = doc.json.images[i];
 
-                if (image == null)
-                    continue;
-
-                if (image.bufferView < 0 ||
-                    doc.json.bufferViews == null ||
-                    image.bufferView >= doc.json.bufferViews.Length)
+                if (image == null || image.bufferView < 0)
                     continue;
 
                 byte[] bytes;
@@ -188,9 +173,7 @@ namespace ULTRADROID.Models
                 }
                 catch (Exception ex)
                 {
-                    LogError(
-                        "Image " + i +
-                        ": failed to extract bytes.", ex);
+                    LogError("Image " + i + " extraction failed.", ex);
                     continue;
                 }
 
@@ -204,11 +187,7 @@ namespace ULTRADROID.Models
                     texture = new Texture2D(
                         2, 2, TextureFormat.RGBA32, true);
 
-                    bool loaded =
-                        ImageConversion.LoadImage(
-                            texture, bytes, false);
-
-                    if (!loaded)
+                    if (!ImageConversion.LoadImage(texture, bytes, false))
                     {
                         UnityEngine.Object.Destroy(texture);
                         continue;
@@ -217,14 +196,11 @@ namespace ULTRADROID.Models
                     texture.name = "ULTRADROID_GLTF_Image_" + i;
                     texture.wrapMode = TextureWrapMode.Repeat;
                     texture.filterMode = FilterMode.Bilinear;
-
                     result[i] = texture;
                 }
                 catch (Exception ex)
                 {
-                    LogError(
-                        "Image " + i +
-                        ": texture creation or decoding failed.", ex);
+                    LogError("Image " + i + " decoding failed.", ex);
 
                     if (texture != null)
                         UnityEngine.Object.Destroy(texture);
@@ -274,10 +250,10 @@ namespace ULTRADROID.Models
 
                 if (pbr != null)
                 {
-                    float metallicFactor =
+                    float metallic =
                         Mathf.Clamp01(pbr.metallicFactor);
 
-                    float roughnessFactor =
+                    float roughness =
                         Mathf.Clamp01(pbr.roughnessFactor);
 
                     if (pbr.baseColorFactor != null &&
@@ -292,102 +268,68 @@ namespace ULTRADROID.Models
 
                     if (pbr.baseColorTexture != null)
                     {
-                        int textureIndex =
-                            pbr.baseColorTexture.index;
-
-                        int imageIndex =
-                            GetImageIndex(doc, textureIndex);
+                        int imageIndex = GetImageIndex(
+                            doc, pbr.baseColorTexture.index);
 
                         if (imageIndex >= 0 &&
                             imageIndex < textures.Length &&
                             textures[imageIndex] != null)
                         {
-                            Texture2D texture = textures[imageIndex];
-
                             if (material.HasProperty("_MainTex"))
-                                material.SetTexture("_MainTex", texture);
+                                material.SetTexture(
+                                    "_MainTex", textures[imageIndex]);
 
                             if (material.HasProperty("_BaseMap"))
-                                material.SetTexture("_BaseMap", texture);
+                                material.SetTexture(
+                                    "_BaseMap", textures[imageIndex]);
                         }
                     }
 
-                    float scalarSmoothness = 1f - roughnessFactor;
+                    float smoothness = 1f - roughness;
 
                     if (material.HasProperty("_Metallic"))
-                        material.SetFloat("_Metallic", metallicFactor);
+                        material.SetFloat("_Metallic", metallic);
 
                     if (material.HasProperty("_Glossiness"))
-                        material.SetFloat("_Glossiness", scalarSmoothness);
+                        material.SetFloat("_Glossiness", smoothness);
 
                     if (material.HasProperty("_Smoothness"))
-                        material.SetFloat("_Smoothness", scalarSmoothness);
+                        material.SetFloat("_Smoothness", smoothness);
 
                     if (pbr.metallicRoughnessTexture != null)
                     {
-                        int mrTextureIndex =
-                            pbr.metallicRoughnessTexture.index;
+                        int imageIndex = GetImageIndex(
+                            doc, pbr.metallicRoughnessTexture.index);
 
-                        int mrImageIndex =
-                            GetImageIndex(doc, mrTextureIndex);
-
-                        bool found =
-                            mrImageIndex >= 0 &&
-                            mrImageIndex < textures.Length &&
-                            textures[mrImageIndex] != null;
-
-                        bool standardWorkflow =
+                        if (imageIndex >= 0 &&
+                            imageIndex < textures.Length &&
+                            textures[imageIndex] != null &&
                             material.HasProperty("_MetallicGlossMap") &&
-                            material.HasProperty("_GlossMapScale");
-
-                        if (found && standardWorkflow)
+                            material.HasProperty("_GlossMapScale"))
                         {
-                            string cacheKey =
-                                mrImageIndex + "|" +
-                                metallicFactor.ToString("R") + "|" +
-                                roughnessFactor.ToString("R");
+                            string key =
+                                imageIndex + "|" +
+                                metallic.ToString("R") + "|" +
+                                roughness.ToString("R");
 
                             Texture2D converted;
 
-                            if (!convertedCache.TryGetValue(
-                                cacheKey, out converted))
+                            if (!convertedCache.TryGetValue(key, out converted))
                             {
-                                converted =
-                                    BuildUnityMetallicGlossTexture(
-                                        textures[mrImageIndex],
-                                        metallicFactor,
-                                        roughnessFactor);
+                                converted = BuildUnityMetallicGlossTexture(
+                                    textures[imageIndex], metallic, roughness);
 
-                                convertedCache[cacheKey] = converted;
+                                convertedCache[key] = converted;
                             }
 
                             if (converted != null)
                             {
-                                try
-                                {
-                                    material.SetTexture(
-                                        "_MetallicGlossMap", converted);
+                                material.SetTexture(
+                                    "_MetallicGlossMap", converted);
 
-                                    material.SetFloat("_Metallic", 1f);
-                                    material.SetFloat("_GlossMapScale", 1f);
-
-                                    if (material.HasProperty(
-                                        "_SmoothnessTextureChannel"))
-                                    {
-                                        material.SetFloat(
-                                            "_SmoothnessTextureChannel", 0f);
-                                    }
-
-                                    material.EnableKeyword(
-                                        "_METALLICGLOSSMAP");
-                                }
-                                catch (Exception ex)
-                                {
-                                    LogError(
-                                        "Material " + i +
-                                        ": metallic-gloss assignment failed.",
-                                        ex);
-                                }
+                                material.SetFloat("_Metallic", 1f);
+                                material.SetFloat("_GlossMapScale", 1f);
+                                material.EnableKeyword("_METALLICGLOSSMAP");
                             }
                         }
                     }
@@ -410,62 +352,39 @@ namespace ULTRADROID.Models
             float roughnessFactor)
         {
             if (source == null)
-            {
-                LogError(
-                    "Metallic-roughness convert: source is null.", null);
                 return null;
-            }
 
             try
             {
-                int width = source.width;
-                int height = source.height;
+                Color32[] pixels = source.GetPixels32();
 
-                if (width <= 0 || height <= 0)
-                {
-                    LogError(
-                        "Metallic-roughness convert: invalid size " +
-                        width + "x" + height, null);
+                if (pixels == null || pixels.Length == 0)
                     return null;
-                }
-
-                Color32[] sourcePixels = source.GetPixels32();
-
-                if (sourcePixels == null || sourcePixels.Length == 0)
-                {
-                    LogError(
-                        "Metallic-roughness convert: no pixels read.", null);
-                    return null;
-                }
 
                 Color32[] convertedPixels =
-                    new Color32[sourcePixels.Length];
+                    new Color32[pixels.Length];
 
-                for (int i = 0; i < sourcePixels.Length; i++)
+                for (int i = 0; i < pixels.Length; i++)
                 {
-                    Color32 pixel = sourcePixels[i];
-
                     float metallic =
-                        (pixel.b / 255f) * metallicFactor;
+                        pixels[i].b / 255f * metallicFactor;
 
                     float roughness =
-                        (pixel.g / 255f) * roughnessFactor;
+                        pixels[i].g / 255f * roughnessFactor;
 
-                    float smoothness = 1f - roughness;
-
-                    byte metallicByte = (byte)Mathf.Clamp(
+                    byte m = (byte)Mathf.Clamp(
                         Mathf.RoundToInt(metallic * 255f), 0, 255);
 
-                    byte smoothnessByte = (byte)Mathf.Clamp(
-                        Mathf.RoundToInt(smoothness * 255f), 0, 255);
+                    byte s = (byte)Mathf.Clamp(
+                        Mathf.RoundToInt((1f - roughness) * 255f),
+                        0, 255);
 
-                    convertedPixels[i] = new Color32(
-                        metallicByte, 0, 0, smoothnessByte);
+                    convertedPixels[i] = new Color32(m, 0, 0, s);
                 }
 
                 Texture2D converted = new Texture2D(
-                    width,
-                    height,
+                    source.width,
+                    source.height,
                     TextureFormat.RGBA32,
                     true,
                     true);
@@ -473,7 +392,6 @@ namespace ULTRADROID.Models
                 converted.name = source.name + "_UnityMetallicGloss";
                 converted.wrapMode = source.wrapMode;
                 converted.filterMode = source.filterMode;
-
                 converted.SetPixels32(convertedPixels);
                 converted.Apply(true, false);
 
@@ -481,10 +399,7 @@ namespace ULTRADROID.Models
             }
             catch (Exception ex)
             {
-                LogError(
-                    "Metallic-roughness conversion failed for " +
-                    source.name, ex);
-
+                LogError("Metallic-roughness conversion failed.", ex);
                 return null;
             }
         }
@@ -500,11 +415,12 @@ namespace ULTRADROID.Models
 
             GltfTexture texture = doc.json.textures[textureIndex];
 
-            if (texture == null)
-                return -1;
-
-            return texture.source;
+            return texture == null ? -1 : texture.source;
         }
+
+        // ------------------------------------------------------------
+        // SCENE AND NODE HIERARCHY
+        // ------------------------------------------------------------
 
         private static void BuildScene(
             GlbDocument doc,
@@ -516,8 +432,63 @@ namespace ULTRADROID.Models
                 doc.json.nodes.Length == 0)
                 return;
 
+            int count = doc.json.nodes.Length;
+
+            // Create one Unity object per glTF node.
+            GameObject[] nodeObjects = new GameObject[count];
+            Transform[] nodeTransforms = new Transform[count];
+
+            int[] roots = GetSceneRoots(doc);
+
+            HashSet<int> guard = new HashSet<int>();
+
+            foreach (int index in roots)
+            {
+                CreateNodeHierarchy(
+                    doc, index, root, nodeObjects, nodeTransforms, guard);
+            }
+
+            // Ensure unreferenced nodes also get objects.
+            // This is important when a skin references joints that are
+            // not part of the selected scene's ordinary hierarchy.
+            for (int i = 0; i < count; i++)
+            {
+                if (nodeObjects[i] == null)
+                {
+                    CreateNodeHierarchy(
+                        doc, i, root, nodeObjects, nodeTransforms, guard);
+                }
+            }
+
+            // All joint transforms now exist. Build meshes afterward.
+            for (int i = 0; i < count; i++)
+            {
+                GltfNode node = doc.json.nodes[i];
+
+                if (node == null || node.mesh < 0 ||
+                    doc.json.meshes == null ||
+                    node.mesh >= doc.json.meshes.Length)
+                    continue;
+
+                GltfMesh mesh = doc.json.meshes[node.mesh];
+
+                if (mesh == null || nodeObjects[i] == null)
+                    continue;
+
+                BuildMesh(
+                    doc,
+                    mesh,
+                    nodeObjects[i],
+                    materials,
+                    options,
+                    node.skin,
+                    nodeTransforms);
+            }
+        }
+
+        private static int[] GetSceneRoots(GlbDocument doc)
+        {
             int sceneIndex = doc.json.scene;
-            int[] roots = null;
 
             if (doc.json.scenes != null &&
                 doc.json.scenes.Length > 0)
@@ -528,59 +499,56 @@ namespace ULTRADROID.Models
 
                 GltfScene scene = doc.json.scenes[sceneIndex];
 
-                if (scene != null)
-                    roots = scene.nodes;
+                if (scene != null && scene.nodes != null &&
+                    scene.nodes.Length > 0)
+                    return scene.nodes;
             }
 
-            if (roots == null || roots.Length == 0)
+            HashSet<int> children = new HashSet<int>();
+
+            foreach (GltfNode node in doc.json.nodes)
             {
-                HashSet<int> childIndices = new HashSet<int>();
+                if (node == null || node.children == null)
+                    continue;
 
-                foreach (GltfNode node in doc.json.nodes)
+                foreach (int child in node.children)
                 {
-                    if (node == null || node.children == null)
-                        continue;
-
-                    foreach (int child in node.children)
-                        childIndices.Add(child);
+                    if (child >= 0 && child < doc.json.nodes.Length)
+                        children.Add(child);
                 }
-
-                List<int> inferredRoots = new List<int>();
-
-                for (int i = 0; i < doc.json.nodes.Length; i++)
-                {
-                    if (!childIndices.Contains(i))
-                        inferredRoots.Add(i);
-                }
-
-                roots = inferredRoots.ToArray();
             }
 
-            HashSet<int> recursionGuard = new HashSet<int>();
+            List<int> roots = new List<int>();
 
-            foreach (int nodeIndex in roots)
+            for (int i = 0; i < doc.json.nodes.Length; i++)
             {
-                BuildNode(
-                    doc,
-                    nodeIndex,
-                    root,
-                    materials,
-                    options,
-                    recursionGuard);
+                if (!children.Contains(i))
+                    roots.Add(i);
             }
+
+            return roots.ToArray();
         }
 
-        private static void BuildNode(
+        private static void CreateNodeHierarchy(
             GlbDocument doc,
             int index,
             Transform parent,
-            Material[] materials,
-            ModelLoadOptions options,
+            GameObject[] objects,
+            Transform[] transforms,
             HashSet<int> guard)
         {
-            if (index < 0 ||
-                index >= doc.json.nodes.Length ||
-                guard.Contains(index))
+            if (index < 0 || index >= doc.json.nodes.Length)
+                return;
+
+            if (guard.Contains(index))
+            {
+                LogError(
+                    "Node hierarchy cycle detected at node " + index + ".",
+                    null);
+                return;
+            }
+
+            if (objects[index] != null)
                 return;
 
             GltfNode node = doc.json.nodes[index];
@@ -590,42 +558,27 @@ namespace ULTRADROID.Models
 
             guard.Add(index);
 
-            GameObject gameObject = new GameObject(
+            GameObject go = new GameObject(
                 string.IsNullOrEmpty(node.name)
                     ? "GLTF_Node_" + index
                     : node.name);
 
-            gameObject.transform.SetParent(parent, false);
+            objects[index] = go;
+            transforms[index] = go.transform;
 
-            ApplyNodeTransform(gameObject.transform, node);
-
-            if (node.mesh >= 0 &&
-                doc.json.meshes != null &&
-                node.mesh < doc.json.meshes.Length)
-            {
-                GltfMesh mesh = doc.json.meshes[node.mesh];
-
-                if (mesh != null)
-                {
-                    BuildMesh(
-                        doc,
-                        mesh,
-                        gameObject,
-                        materials,
-                        options);
-                }
-            }
+            go.transform.SetParent(parent, false);
+            ApplyNodeTransform(go.transform, node);
 
             if (node.children != null)
             {
                 foreach (int child in node.children)
                 {
-                    BuildNode(
+                    CreateNodeHierarchy(
                         doc,
                         child,
-                        gameObject.transform,
-                        materials,
-                        options,
+                        go.transform,
+                        objects,
+                        transforms,
                         guard);
                 }
             }
@@ -650,10 +603,19 @@ namespace ULTRADROID.Models
                     }
                 }
 
-                transform.localPosition = matrix.GetColumn(3);
-                transform.localRotation = matrix.rotation;
-                transform.localScale = matrix.lossyScale;
+                Vector3 position;
+                Quaternion rotation;
+                Vector3 scale;
 
+                // Unity can decompose a matrix into these components.
+                position = matrix.GetColumn(3);
+
+                rotation = matrix.rotation;
+                scale = matrix.lossyScale;
+
+                transform.localPosition = position;
+                transform.localRotation = rotation;
+                transform.localScale = scale;
                 return;
             }
 
@@ -684,26 +646,85 @@ namespace ULTRADROID.Models
             }
         }
 
+        // ------------------------------------------------------------
+        // MESH BUILDING, INCLUDING SKINNED MESHES
+        // ------------------------------------------------------------
+
         private static void BuildMesh(
             GlbDocument doc,
             GltfMesh source,
             GameObject gameObject,
             Material[] materials,
-            ModelLoadOptions options)
+            ModelLoadOptions options,
+            int skinIndex,
+            Transform[] nodeTransforms)
         {
             if (source.primitives == null ||
                 source.primitives.Length == 0)
                 return;
 
+            GltfSkin skin = null;
+            Transform[] bones = null;
+            Transform rootBone = null;
+
+            bool skinned =
+                skinIndex >= 0 &&
+                doc.json.skins != null &&
+                skinIndex < doc.json.skins.Length;
+
+            if (skinned)
+            {
+                skin = doc.json.skins[skinIndex];
+
+                if (skin == null || skin.joints == null ||
+                    skin.joints.Length == 0)
+                {
+                    throw new InvalidDataException(
+                        "Skin has no joints.");
+                }
+
+                bones = new Transform[skin.joints.Length];
+
+                for (int i = 0; i < skin.joints.Length; i++)
+                {
+                    int jointNode = skin.joints[i];
+
+                    if (jointNode < 0 ||
+                        jointNode >= nodeTransforms.Length ||
+                        nodeTransforms[jointNode] == null)
+                    {
+                        throw new InvalidDataException(
+                            "Skin joint references an invalid node: " +
+                            jointNode);
+                    }
+
+                    bones[i] = nodeTransforms[jointNode];
+                }
+
+                if (skin.skeleton >= 0 &&
+                    skin.skeleton < nodeTransforms.Length)
+                {
+                    rootBone = nodeTransforms[skin.skeleton];
+                }
+
+                if (rootBone == null)
+                    rootBone = bones[0];
+            }
+
             List<Vector3> vertices = new List<Vector3>();
             List<Vector3> normals = new List<Vector3>();
             List<Vector2> uv = new List<Vector2>();
+            List<BoneWeight> boneWeights = new List<BoneWeight>();
 
-            List<List<int>> submeshTriangles = new List<List<int>>();
-            List<Material> submeshMaterials = new List<Material>();
+            List<List<int>> submeshTriangles =
+                new List<List<int>>();
+
+            List<Material> submeshMaterials =
+                new List<Material>();
 
             bool hasNormals = true;
             bool hasUv = true;
+            bool hasBoneWeights = skinned;
 
             foreach (GltfPrimitive primitive in source.primitives)
             {
@@ -724,14 +745,18 @@ namespace ULTRADROID.Models
                 Vector3[] primitiveNormals = null;
 
                 if (primitive.attributes.NORMAL >= 0)
+                {
                     primitiveNormals =
                         doc.ReadVector3(primitive.attributes.NORMAL);
+                }
 
                 Vector2[] primitiveUv = null;
 
                 if (primitive.attributes.TEXCOORD_0 >= 0)
+                {
                     primitiveUv =
                         doc.ReadVector2(primitive.attributes.TEXCOORD_0);
+                }
 
                 int vertexOffset = vertices.Count;
                 vertices.AddRange(primitiveVertices);
@@ -754,6 +779,81 @@ namespace ULTRADROID.Models
                 else
                 {
                     uv.AddRange(primitiveUv);
+                }
+
+                if (skinned)
+                {
+                    int jointsAccessor = primitive.attributes.JOINTS_0;
+                    int weightsAccessor = primitive.attributes.WEIGHTS_0;
+
+                    if (jointsAccessor < 0 || weightsAccessor < 0)
+                    {
+                        hasBoneWeights = false;
+                    }
+                    else
+                    {
+                        int[] joints =
+                            doc.ReadJointIndices(jointsAccessor);
+
+                        float[] weights =
+                            doc.ReadWeights(weightsAccessor);
+
+                        int vertexCount = primitiveVertices.Length;
+
+                        if (joints.Length != vertexCount * 4 ||
+                            weights.Length != vertexCount * 4)
+                        {
+                            throw new InvalidDataException(
+                                "JOINTS_0 or WEIGHTS_0 count does not " +
+                                "match the primitive vertex count.");
+                        }
+
+                        for (int v = 0; v < vertexCount; v++)
+                        {
+                            BoneWeight bw = new BoneWeight();
+
+                            bw.boneIndex0 = joints[v * 4];
+                            bw.boneIndex1 = joints[v * 4 + 1];
+                            bw.boneIndex2 = joints[v * 4 + 2];
+                            bw.boneIndex3 = joints[v * 4 + 3];
+
+                            bw.weight0 = weights[v * 4];
+                            bw.weight1 = weights[v * 4 + 1];
+                            bw.weight2 = weights[v * 4 + 2];
+                            bw.weight3 = weights[v * 4 + 3];
+
+                            float total =
+                                bw.weight0 + bw.weight1 +
+                                bw.weight2 + bw.weight3;
+
+                            if (total > 0.000001f)
+                            {
+                                bw.weight0 /= total;
+                                bw.weight1 /= total;
+                                bw.weight2 /= total;
+                                bw.weight3 /= total;
+                            }
+                            else
+                            {
+                                bw.boneIndex0 = 0;
+                                bw.boneIndex1 = 0;
+                                bw.boneIndex2 = 0;
+                                bw.boneIndex3 = 0;
+
+                                bw.weight0 = 1f;
+                                bw.weight1 = 0f;
+                                bw.weight2 = 0f;
+                                bw.weight3 = 0f;
+                            }
+
+                            ValidateBoneIndex(bw.boneIndex0, bones.Length);
+                            ValidateBoneIndex(bw.boneIndex1, bones.Length);
+                            ValidateBoneIndex(bw.boneIndex2, bones.Length);
+                            ValidateBoneIndex(bw.boneIndex3, bones.Length);
+
+                            boneWeights.Add(bw);
+                        }
+                    }
                 }
 
                 int[] indices = primitive.indices >= 0
@@ -802,38 +902,38 @@ namespace ULTRADROID.Models
                 : source.name;
 
             if (vertices.Count > 65535)
+            {
                 mesh.indexFormat =
                     UnityEngine.Rendering.IndexFormat.UInt32;
+            }
 
-            Il2CppSystem.Collections.Generic.List<Vector3>
-                il2CppVertices =
-                    new Il2CppSystem.Collections.Generic.List<Vector3>();
+            Il2CppSystem.Collections.Generic.List<Vector3> ilVertices =
+                new Il2CppSystem.Collections.Generic.List<Vector3>();
 
             foreach (Vector3 vertex in vertices)
-                il2CppVertices.Add(vertex);
+                ilVertices.Add(vertex);
 
-            mesh.SetVertices(il2CppVertices);
+            mesh.SetVertices(ilVertices);
             mesh.subMeshCount = submeshTriangles.Count;
 
             for (int i = 0; i < submeshTriangles.Count; i++)
             {
-                Il2CppStructArray<int> triangleArray =
+                mesh.SetTriangles(
                     new Il2CppStructArray<int>(
-                        submeshTriangles[i].ToArray());
-
-                mesh.SetTriangles(triangleArray, i, false);
+                        submeshTriangles[i].ToArray()),
+                    i,
+                    false);
             }
 
             if (hasNormals && normals.Count == vertices.Count)
             {
-                Il2CppSystem.Collections.Generic.List<Vector3>
-                    il2CppNormals =
+                Il2CppSystem.Collections.Generic.List<Vector3> ilNormals =
                     new Il2CppSystem.Collections.Generic.List<Vector3>();
 
                 foreach (Vector3 normal in normals)
-                    il2CppNormals.Add(normal);
+                    ilNormals.Add(normal);
 
-                mesh.SetNormals(il2CppNormals);
+                mesh.SetNormals(ilNormals);
             }
             else
             {
@@ -842,45 +942,141 @@ namespace ULTRADROID.Models
 
             if (hasUv && uv.Count == vertices.Count)
             {
-                Il2CppSystem.Collections.Generic.List<Vector4>
-                    il2CppUv =
+                Il2CppSystem.Collections.Generic.List<Vector4> ilUv =
                     new Il2CppSystem.Collections.Generic.List<Vector4>();
-
-                bool flipV = options.FlipUvV;
 
                 foreach (Vector2 coordinate in uv)
                 {
-                    il2CppUv.Add(new Vector4(
+                    ilUv.Add(new Vector4(
                         coordinate.x,
-                        flipV ? 1f - coordinate.y : coordinate.y,
+                        options.FlipUvV
+                            ? 1f - coordinate.y
+                            : coordinate.y,
                         0f,
                         0f));
                 }
 
-                mesh.SetUVs(0, il2CppUv);
+                mesh.SetUVs(0, ilUv);
             }
 
-            mesh.RecalculateBounds();
-
-            MeshFilter filter =
-                gameObject.AddComponent<MeshFilter>();
-
-            filter.sharedMesh = mesh;
-
-            MeshRenderer renderer =
-                gameObject.AddComponent<MeshRenderer>();
-
-            renderer.sharedMaterials =
-                new Il2CppReferenceArray<Material>(
-                    submeshMaterials.ToArray());
-
-            if (options.CreateColliders)
+            if (skinned && hasBoneWeights &&
+                boneWeights.Count == vertices.Count)
             {
-                MeshCollider collider =
-                    gameObject.AddComponent<MeshCollider>();
+                mesh.boneWeights =
+                    new Il2CppStructArray<BoneWeight>(
+                        boneWeights.ToArray());
 
-                collider.sharedMesh = mesh;
+                Matrix4x4[] bindPoses =
+                    BuildBindPoses(doc, skin, bones, gameObject.transform);
+
+                mesh.bindposes =
+                    new Il2CppStructArray<Matrix4x4>(bindPoses);
+
+                mesh.RecalculateBounds();
+
+                SkinnedMeshRenderer renderer =
+                    gameObject.AddComponent<SkinnedMeshRenderer>();
+
+                renderer.sharedMesh = mesh;
+                renderer.bones =
+                    new Il2CppReferenceArray<Transform>(bones);
+
+                renderer.rootBone = rootBone;
+
+                renderer.sharedMaterials =
+                    new Il2CppReferenceArray<Material>(
+                        submeshMaterials.ToArray());
+
+                if (options.CreateColliders)
+                {
+                    // MeshCollider does not deform with the skeleton.
+                    // This collider uses the mesh's original pose.
+                    MeshCollider collider =
+                        gameObject.AddComponent<MeshCollider>();
+
+                    collider.sharedMesh = mesh;
+                }
             }
+            else
+            {
+                if (skinned)
+                {
+                    LogError(
+                        "Node '" + gameObject.name +
+                        "' has a skin but one or more primitives are " +
+                        "missing valid JOINTS_0/WEIGHTS_0 data. " +
+                        "Loading it as a static mesh.", null);
+                }
+
+                mesh.RecalculateBounds();
+
+                MeshFilter filter =
+                    gameObject.AddComponent<MeshFilter>();
+
+                filter.sharedMesh = mesh;
+
+                MeshRenderer renderer =
+                    gameObject.AddComponent<MeshRenderer>();
+
+                renderer.sharedMaterials =
+                    new Il2CppReferenceArray<Material>(
+                        submeshMaterials.ToArray());
+
+                if (options.CreateColliders)
+                {
+                    MeshCollider collider =
+                        gameObject.AddComponent<MeshCollider>();
+
+                    collider.sharedMesh = mesh;
+                }
+            }
+        }
+
+        private static void ValidateBoneIndex(
+            int boneIndex,
+            int boneCount)
+        {
+            if (boneIndex < 0 || boneIndex >= boneCount)
+            {
+                throw new InvalidDataException(
+                    "Vertex joint index " + boneIndex +
+                    " exceeds the skin's joint count " + boneCount + ".");
+            }
+        }
+
+        private static Matrix4x4[] BuildBindPoses(
+            GlbDocument doc,
+            GltfSkin skin,
+            Transform[] bones,
+            Transform meshTransform)
+        {
+            // Prefer the GLB's inverse bind matrices when supplied.
+            if (skin.inverseBindMatrices >= 0)
+            {
+                Matrix4x4[] matrices =
+                    doc.ReadMatrix4x4(skin.inverseBindMatrices);
+
+                if (matrices.Length != bones.Length)
+                {
+                    throw new InvalidDataException(
+                        "Inverse bind matrix count does not match " +
+                        "the skin's joint count.");
+                }
+
+                return matrices;
+            }
+
+            // Fallback for skins without inverseBindMatrices.
+            Matrix4x4[] result = new Matrix4x4[bones.Length];
+
+            for (int i = 0; i < bones.Length; i++)
+            {
+                result[i] =
+                    bones[i].worldToLocalMatrix *
+                    meshTransform.localToWorldMatrix;
+            }
+
+            return result;
         }
 
         private static int[] MakeSequential(int count)
@@ -893,6 +1089,10 @@ namespace ULTRADROID.Models
             return result;
         }
     }
+
+    // ------------------------------------------------------------
+    // GLB FILE READER
+    // ------------------------------------------------------------
 
     internal sealed class GlbDocument
     {
@@ -1005,7 +1205,6 @@ namespace ULTRADROID.Models
             return result;
         }
 
-        // Reads animation metadata and actual binary keyframe values.
         internal GlbAnimationData[] ReadAnimations()
         {
             if (json.animations == null ||
@@ -1063,12 +1262,10 @@ namespace ULTRADROID.Models
                             "Unsupported animation path: " + path);
                     }
 
-                    // Input: timestamps in seconds.
-                    GltfAccessor inputAccessor =
-                        GetAccessor(sampler.input);
+                    GltfAccessor input = GetAccessor(sampler.input);
 
-                    if (inputAccessor.componentType != 5126 ||
-                        inputAccessor.type != "SCALAR")
+                    if (input.componentType != 5126 ||
+                        input.type != "SCALAR")
                     {
                         throw new InvalidDataException(
                             "Animation timestamps must use FLOAT SCALAR.");
@@ -1091,25 +1288,20 @@ namespace ULTRADROID.Models
                         }
 
                         if (i > 0 && times[i] < times[i - 1])
-                        {
                             throw new InvalidDataException(
                                 "Animation timestamps are not ordered.");
-                        }
 
                         if (times[i] > duration)
                             duration = times[i];
                     }
 
-                    // Output: actual keyframe values.
-                    GltfAccessor outputAccessor =
-                        GetAccessor(sampler.output);
+                    GltfAccessor output = GetAccessor(sampler.output);
 
-                    if (outputAccessor.componentType != 5126)
+                    if (output.componentType != 5126)
                         throw new InvalidDataException(
                             "Animation output must use FLOAT values.");
 
-                    int components =
-                        ComponentCount(outputAccessor.type);
+                    int components = ComponentCount(output.type);
 
                     float[] values =
                         ReadFloats(sampler.output, components);
@@ -1133,33 +1325,27 @@ namespace ULTRADROID.Models
                     int expectedElements =
                         checked(times.Length * multiplier);
 
-                    if (outputAccessor.count % expectedElements != 0)
+                    if (output.count % expectedElements != 0)
                     {
                         throw new InvalidDataException(
                             "Animation output count does not match timestamps.");
                     }
 
                     int valuesPerKeyframe =
-                        outputAccessor.count /
-                        expectedElements * components;
+                        output.count / expectedElements * components;
 
-                    if (path == "translation" || path == "scale")
+                    if ((path == "translation" || path == "scale") &&
+                        (components != 3 || valuesPerKeyframe != 3))
                     {
-                        if (components != 3 ||
-                            valuesPerKeyframe != 3)
-                        {
-                            throw new InvalidDataException(
-                                path + " animation must use VEC3 values.");
-                        }
+                        throw new InvalidDataException(
+                            path + " animation must use VEC3 values.");
                     }
-                    else if (path == "rotation")
+
+                    if (path == "rotation" &&
+                        (components != 4 || valuesPerKeyframe != 4))
                     {
-                        if (components != 4 ||
-                            valuesPerKeyframe != 4)
-                        {
-                            throw new InvalidDataException(
-                                "Rotation animation must use VEC4 values.");
-                        }
+                        throw new InvalidDataException(
+                            "Rotation animation must use VEC4 values.");
                     }
 
                     tracks.Add(new GlbAnimationTrack
@@ -1218,6 +1404,40 @@ namespace ULTRADROID.Models
             return result;
         }
 
+        internal Matrix4x4[] ReadMatrix4x4(int accessorIndex)
+        {
+            GltfAccessor accessor = GetAccessor(accessorIndex);
+
+            if (accessor.componentType != 5126 ||
+                accessor.type != "MAT4")
+            {
+                throw new InvalidDataException(
+                    "Inverse bind matrices must use FLOAT MAT4.");
+            }
+
+            float[] values = ReadFloatsRaw(accessorIndex, 16);
+            Matrix4x4[] result =
+                new Matrix4x4[accessor.count];
+
+            for (int i = 0; i < accessor.count; i++)
+            {
+                Matrix4x4 matrix = new Matrix4x4();
+
+                for (int row = 0; row < 4; row++)
+                {
+                    for (int column = 0; column < 4; column++)
+                    {
+                        matrix[row, column] =
+                            values[i * 16 + column * 4 + row];
+                    }
+                }
+
+                result[i] = matrix;
+            }
+
+            return result;
+        }
+
         internal float[] ReadFloats(int accessorIndex, int components)
         {
             GltfAccessor accessor = GetAccessor(accessorIndex);
@@ -1230,9 +1450,17 @@ namespace ULTRADROID.Models
                 throw new InvalidDataException(
                     "Unexpected accessor type.");
 
+            return ReadFloatsRaw(accessorIndex, components);
+        }
+
+        private float[] ReadFloatsRaw(
+            int accessorIndex,
+            int components)
+        {
+            GltfAccessor accessor = GetAccessor(accessorIndex);
             GltfBufferView view = GetView(accessor.bufferView);
 
-            int elementSize = components * 4;
+            int elementSize = checked(components * 4);
 
             int stride = view.byteStride > 0
                 ? view.byteStride
@@ -1242,8 +1470,7 @@ namespace ULTRADROID.Models
                 throw new InvalidDataException(
                     "Accessor byte stride is too small.");
 
-            int start = checked(
-                view.byteOffset + accessor.byteOffset);
+            int start = checked(view.byteOffset + accessor.byteOffset);
 
             float[] result =
                 new float[checked(accessor.count * components)];
@@ -1252,18 +1479,145 @@ namespace ULTRADROID.Models
             {
                 for (int c = 0; c < components; c++)
                 {
-                    int offset = checked(
-                        start + i * stride + c * 4);
+                    int offset =
+                        checked(start + i * stride + c * 4);
 
-                    if (offset < 0 ||
-                        offset + 4 > binary.Length)
-                    {
-                        throw new InvalidDataException(
-                            "Accessor exceeds binary data.");
-                    }
+                    EnsureBinaryRange(offset, 4);
 
                     result[i * components + c] =
                         BitConverter.ToSingle(binary, offset);
+                }
+            }
+
+            return result;
+        }
+
+        internal int[] ReadJointIndices(int accessorIndex)
+        {
+            GltfAccessor accessor = GetAccessor(accessorIndex);
+
+            if (accessor.type != "VEC4")
+                throw new InvalidDataException(
+                    "JOINTS_0 must use VEC4.");
+
+            if (accessor.componentType != 5121 &&
+                accessor.componentType != 5123)
+            {
+                throw new InvalidDataException(
+                    "JOINTS_0 must use UNSIGNED_BYTE or UNSIGNED_SHORT.");
+            }
+
+            GltfBufferView view = GetView(accessor.bufferView);
+
+            int componentSize =
+                accessor.componentType == 5121 ? 1 : 2;
+
+            int elementSize = componentSize * 4;
+
+            int stride = view.byteStride > 0
+                ? view.byteStride
+                : elementSize;
+
+            if (stride < elementSize)
+                throw new InvalidDataException(
+                    "JOINTS_0 byte stride is too small.");
+
+            int start = checked(view.byteOffset + accessor.byteOffset);
+            int[] result = new int[checked(accessor.count * 4)];
+
+            for (int i = 0; i < accessor.count; i++)
+            {
+                for (int c = 0; c < 4; c++)
+                {
+                    int offset =
+                        checked(start + i * stride + c * componentSize);
+
+                    EnsureBinaryRange(offset, componentSize);
+
+                    int value = componentSize == 1
+                        ? binary[offset]
+                        : BitConverter.ToUInt16(binary, offset);
+
+                    result[i * 4 + c] = value;
+                }
+            }
+
+            return result;
+        }
+
+        internal float[] ReadWeights(int accessorIndex)
+        {
+            GltfAccessor accessor = GetAccessor(accessorIndex);
+
+            if (accessor.type != "VEC4")
+                throw new InvalidDataException(
+                    "WEIGHTS_0 must use VEC4.");
+
+            GltfBufferView view = GetView(accessor.bufferView);
+
+            int componentSize =
+                accessor.componentType == 5126 ? 4 :
+                accessor.componentType == 5121 ? 1 :
+                accessor.componentType == 5123 ? 2 : 0;
+
+            if (componentSize == 0)
+                throw new InvalidDataException(
+                    "Unsupported WEIGHTS_0 component type.");
+
+            if (accessor.componentType != 5126 &&
+                !accessor.normalized)
+            {
+                throw new InvalidDataException(
+                    "Integer WEIGHTS_0 accessors must be normalized.");
+            }
+
+            int elementSize = componentSize * 4;
+
+            int stride = view.byteStride > 0
+                ? view.byteStride
+                : elementSize;
+
+            if (stride < elementSize)
+                throw new InvalidDataException(
+                    "WEIGHTS_0 byte stride is too small.");
+
+            int start = checked(view.byteOffset + accessor.byteOffset);
+
+            float[] result = new float[checked(accessor.count * 4)];
+
+            for (int i = 0; i < accessor.count; i++)
+            {
+                for (int c = 0; c < 4; c++)
+                {
+                    int offset =
+                        checked(start + i * stride + c * componentSize);
+
+                    EnsureBinaryRange(offset, componentSize);
+
+                    float value;
+
+                    if (accessor.componentType == 5126)
+                    {
+                        value = BitConverter.ToSingle(binary, offset);
+                    }
+                    else if (accessor.componentType == 5121)
+                    {
+                        value = binary[offset] / 255f;
+                    }
+                    else
+                    {
+                        value =
+                            BitConverter.ToUInt16(binary, offset) / 65535f;
+                    }
+
+                    if (float.IsNaN(value) || float.IsInfinity(value) ||
+                        value < 0f)
+                    {
+                        throw new InvalidDataException(
+                            "WEIGHTS_0 contains an invalid weight.");
+                    }
+
+                    result[i * 4 + c] = value;
                 }
             }
 
@@ -1301,21 +1655,13 @@ namespace ULTRADROID.Models
                 throw new InvalidDataException(
                     "Index byte stride is too small.");
 
-            int start = checked(
-                view.byteOffset + accessor.byteOffset);
-
+            int start = checked(view.byteOffset + accessor.byteOffset);
             int[] result = new int[accessor.count];
 
             for (int i = 0; i < accessor.count; i++)
             {
                 int offset = checked(start + i * stride);
-
-                if (offset < 0 ||
-                    offset + elementSize > binary.Length)
-                {
-                    throw new InvalidDataException(
-                        "Index accessor exceeds binary data.");
-                }
+                EnsureBinaryRange(offset, elementSize);
 
                 if (elementSize == 1)
                 {
@@ -1323,13 +1669,11 @@ namespace ULTRADROID.Models
                 }
                 else if (elementSize == 2)
                 {
-                    result[i] =
-                        BitConverter.ToUInt16(binary, offset);
+                    result[i] = BitConverter.ToUInt16(binary, offset);
                 }
                 else
                 {
-                    uint value =
-                        BitConverter.ToUInt32(binary, offset);
+                    uint value = BitConverter.ToUInt32(binary, offset);
 
                     if (value > int.MaxValue)
                         throw new InvalidDataException(
@@ -1358,12 +1702,9 @@ namespace ULTRADROID.Models
                 throw new InvalidDataException(
                     "Accessor entry is null.");
 
-            if (accessor.count < 0 ||
-                accessor.byteOffset < 0)
-            {
+            if (accessor.count < 0 || accessor.byteOffset < 0)
                 throw new InvalidDataException(
                     "Accessor has a negative count or offset.");
-            }
 
             return accessor;
         }
@@ -1400,12 +1741,24 @@ namespace ULTRADROID.Models
             return view;
         }
 
+        private void EnsureBinaryRange(int offset, int size)
+        {
+            if (offset < 0 || size < 0 ||
+                offset > binary.Length ||
+                size > binary.Length - offset)
+            {
+                throw new InvalidDataException(
+                    "Accessor exceeds binary data.");
+            }
+        }
+
         private static int ComponentCount(string type)
         {
             if (type == "SCALAR") return 1;
             if (type == "VEC2") return 2;
             if (type == "VEC3") return 3;
             if (type == "VEC4") return 4;
+            if (type == "MAT4") return 16;
 
             throw new InvalidDataException(
                 "Unsupported accessor type: " + type);
@@ -1416,6 +1769,10 @@ namespace ULTRADROID.Models
             return BitConverter.ToUInt32(bytes, offset);
         }
     }
+
+    // ------------------------------------------------------------
+    // GLTF DATA CLASSES
+    // ------------------------------------------------------------
 
     [Serializable]
     internal class GltfRoot
@@ -1430,9 +1787,17 @@ namespace ULTRADROID.Models
         public GltfImage[] images;
         public GltfBufferView[] bufferViews;
         public GltfAccessor[] accessors;
-
-        // Animation metadata parsed by GlbManualJsonParser.
         public GltfAnimation[] animations;
+        public GltfSkin[] skins;
+    }
+
+    [Serializable]
+    internal sealed class GltfSkin
+    {
+        public string name;
+        public int[] joints;
+        public int skeleton = -1;
+        public int inverseBindMatrices = -1;
     }
 
     [Serializable]
@@ -1482,6 +1847,7 @@ namespace ULTRADROID.Models
     {
         public string name;
         public int mesh = -1;
+        public int skin = -1;
         public int[] children;
         public float[] translation;
         public float[] rotation;
@@ -1512,6 +1878,9 @@ namespace ULTRADROID.Models
         public int NORMAL = -1;
         public int TANGENT = -1;
         public int TEXCOORD_0 = -1;
+
+        public int JOINTS_0 = -1;
+        public int WEIGHTS_0 = -1;
     }
 
     [Serializable]
