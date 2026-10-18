@@ -1,4 +1,49 @@
 
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Find project files
+        run: |
+          echo "C# project files:"
+          find . -name "*.csproj" \
+            -not -path "*/obj/*" \
+            -not -path "*/bin/*"
+
+      - name: Check required game assemblies
+        run: |
+          required=(
+            Assembly-CSharp.dll
+            Il2Cppmscorlib.dll
+            Il2CppInterop.Runtime.dll
+            UnityEngine.CoreModule.dll
+            UnityEngine.JSONSerializeModule.dll
+            UnityEngine.ImageConversionModule.dll
+            UnityEngine.PhysicsModule.dll
+          )
+
+          for file in "${required[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing required assembly: $file"
+              exit 1
+            fi
+          done
+
       - name: Check ULTRADROID dependencies
         run: |
           for file in ULTRADROID.API.dll ULTRADROID.Core.dll; do
@@ -7,6 +52,17 @@
               exit 1
             fi
           done
+
+      - name: Verify example project exists
+        run: |
+          if [ ! -f "examples/ExampleMod.csproj" ]; then
+            echo "::error::examples/ExampleMod.csproj not found."
+            echo "Available project files:"
+            find . -name "*.csproj" \
+              -not -path "*/obj/*" \
+              -not -path "*/bin/*"
+            exit 1
+          fi
 
       - name: Restore example and API
         run: |
@@ -20,7 +76,7 @@
             --configuration Release \
             --no-restore
 
-      - name: Verify output DLLs
+      - name: Verify build outputs
         run: |
           test -f bin/Release/net10.0/ULTRADROID.Models.dll
           test -f examples/bin/Release/net10.0/WeaponModExample.dll
@@ -37,9 +93,9 @@
         uses: actions/upload-artifact@v4
         with:
           name: ULTRADROID-Plugins
+          if-no-files-found: error
           path: |
             bin/Release/net10.0/ULTRADROID.Models.dll
             examples/bin/Release/net10.0/WeaponModExample.dll
             ULTRADROID.API.dll
             ULTRADROID.Core.dll
-          if-no-files-found: error
