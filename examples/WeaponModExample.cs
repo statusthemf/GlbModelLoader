@@ -1,4 +1,3 @@
-
 using Il2CppInterop.Runtime.Injection;
 using System;
 using System.Collections.Generic;
@@ -247,58 +246,127 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
         LogInfo("Registering animation controls.");
 
-        // Compact two-row cluster. The offsets are based on the
-        // working Controls API demo's positive-coordinate convention.
-        const float x0 = 120f;
-        const float y0 = 90f;
-        const float dx = 65f;
-        const float dy = 58f;
+        // Register through the existing ULTRADROID Controls API.
+        // Do not pass Action as a parameter to an injected MonoBehaviour method.
 
-        AddControl("Prev", x0,          y0,       PreviousAnimation);
-        AddControl("Play", x0 + dx,     y0,       PlaySelected);
-        AddControl("Pause", x0 + dx*2f, y0,       PauseAnimation);
-        AddControl("Stop", x0 + dx*3f,  y0,       StopAnimation);
-
-        AddControl("Next", x0,          y0 + dy,  NextAnimation);
-        AddControl("Speed", x0 + dx,    y0 + dy,  ChangeSpeed);
-        AddControl("Loop", x0 + dx*2f,  y0 + dy,  ToggleLoop);
-    }
-
-    private void AddControl(
-        string label,
-        float x,
-        float y,
-        Action callback)
-    {
         try
         {
-            ButtonHandle handle = ULTRADROIDControls.AddButton(
-                new ButtonConfig
-                {
-                    Id = "ULTRADROID.Blades.Animation." + label,
-                    Label = label,
-                    PositionOffset = new Vector2(x, y),
-                    ApplyTint = false,
-                    ScaleMultiplier = 0.55f,
-                    OnClick = callback
-                });
+            ButtonHandle handle = ULTRADROIDControls.AddButton(new ButtonConfig
+            {
+                Id = "ULTRADROID.Blades.Animation.Prev",
+                Label = "Prev",
+                PositionOffset = new Vector2(120f, 90f),
+                ApplyTint = false,
+                ScaleMultiplier = 0.55f,
+                OnClick = PreviousAnimation
+            });
 
-            if (handle != null)
-            {
-                _buttons.Add(handle);
-                LogInfo("Registered control: " + label);
-            }
-            else
-            {
-                LogWarning(
-                    "Controls API returned a null handle for " + label);
-            }
+            if (handle != null) _buttons.Add(handle);
+            LogInfo("Registered control: Prev");
         }
-        catch (Exception ex)
+        catch (Exception ex) { LogError("Prev registration failed: " + ex); }
+
+        try
         {
-            LogError(
-                "Failed to register control " + label + ": " + ex);
+            ButtonHandle handle = ULTRADROIDControls.AddButton(new ButtonConfig
+            {
+                Id = "ULTRADROID.Blades.Animation.Play",
+                Label = "Play",
+                PositionOffset = new Vector2(185f, 90f),
+                ApplyTint = false,
+                ScaleMultiplier = 0.55f,
+                OnClick = PlaySelected
+            });
+
+            if (handle != null) _buttons.Add(handle);
+            LogInfo("Registered control: Play");
         }
+        catch (Exception ex) { LogError("Play registration failed: " + ex); }
+
+        try
+        {
+            ButtonHandle handle = ULTRADROIDControls.AddButton(new ButtonConfig
+            {
+                Id = "ULTRADROID.Blades.Animation.Pause",
+                Label = "Pause",
+                PositionOffset = new Vector2(250f, 90f),
+                ApplyTint = false,
+                ScaleMultiplier = 0.55f,
+                OnClick = PauseAnimation
+            });
+
+            if (handle != null) _buttons.Add(handle);
+            LogInfo("Registered control: Pause");
+        }
+        catch (Exception ex) { LogError("Pause registration failed: " + ex); }
+
+        try
+        {
+            ButtonHandle handle = ULTRADROIDControls.AddButton(new ButtonConfig
+            {
+                Id = "ULTRADROID.Blades.Animation.Stop",
+                Label = "Stop",
+                PositionOffset = new Vector2(315f, 90f),
+                ApplyTint = false,
+                ScaleMultiplier = 0.55f,
+                OnClick = StopAnimation
+            });
+
+            if (handle != null) _buttons.Add(handle);
+            LogInfo("Registered control: Stop");
+        }
+        catch (Exception ex) { LogError("Stop registration failed: " + ex); }
+
+        try
+        {
+            ButtonHandle handle = ULTRADROIDControls.AddButton(new ButtonConfig
+            {
+                Id = "ULTRADROID.Blades.Animation.Next",
+                Label = "Next",
+                PositionOffset = new Vector2(120f, 148f),
+                ApplyTint = false,
+                ScaleMultiplier = 0.55f,
+                OnClick = NextAnimation
+            });
+
+            if (handle != null) _buttons.Add(handle);
+            LogInfo("Registered control: Next");
+        }
+        catch (Exception ex) { LogError("Next registration failed: " + ex); }
+
+        try
+        {
+            ButtonHandle handle = ULTRADROIDControls.AddButton(new ButtonConfig
+            {
+                Id = "ULTRADROID.Blades.Animation.Speed",
+                Label = "Speed",
+                PositionOffset = new Vector2(185f, 148f),
+                ApplyTint = false,
+                ScaleMultiplier = 0.55f,
+                OnClick = ChangeSpeed
+            });
+
+            if (handle != null) _buttons.Add(handle);
+            LogInfo("Registered control: Speed");
+        }
+        catch (Exception ex) { LogError("Speed registration failed: " + ex); }
+
+        try
+        {
+            ButtonHandle handle = ULTRADROIDControls.AddButton(new ButtonConfig
+            {
+                Id = "ULTRADROID.Blades.Animation.Loop",
+                Label = "Loop",
+                PositionOffset = new Vector2(250f, 148f),
+                ApplyTint = false,
+                ScaleMultiplier = 0.55f,
+                OnClick = ToggleLoop
+            });
+
+            if (handle != null) _buttons.Add(handle);
+            LogInfo("Registered control: Loop");
+        }
+        catch (Exception ex) { LogError("Loop registration failed: " + ex); }
     }
 
     private void PlaySelected()
