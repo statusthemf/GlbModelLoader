@@ -88,14 +88,13 @@ public void Update()
                     _gameCamera.transform,  
                     false);  
 
-                _modelRoot.transform.localPosition =  
-                    new Vector3(0f, 0f, 1f);  
+                _modelRoot.transform.localPosition =
+                    new Vector3(0f, 0f, 2f);
 
-                _modelRoot.transform.localRotation =  
-                    Quaternion.identity;  
+                _modelRoot.transform.localRotation =
+                    Quaternion.identity;
 
-                _modelRoot.transform.localScale =  
-                    Vector3.one * 0.1f;  
+                _modelRoot.transform.localScale = Vector3.one;  
             }  
         }  
     }  
@@ -196,31 +195,48 @@ private void TryLoadModel()
         _modelRoot = loaded;  
         _modelRoot.name = "ULTRADROID_BladesOfChaos";  
 
-        _gameCamera = camera;  
+        _gameCamera = camera;
 
-        _modelRoot.transform.SetParent(  
-            _gameCamera.transform,  
-            false);  
+        _modelRoot.transform.SetParent(
+            _gameCamera.transform,
+            false);
 
-        _modelRoot.transform.localPosition =  
-            new Vector3(0f, 0f, 1f);  
+        _modelRoot.transform.localPosition =
+            new Vector3(0f, 0f, 2f);
 
-        _modelRoot.transform.localRotation =  
-            Quaternion.identity;  
+        _modelRoot.transform.localRotation =
+            Quaternion.identity;
 
-        _modelRoot.transform.localScale =  
-            Vector3.one * 0.1f;  
+        // Temporarily use full size to make the model easier to see.
+        _modelRoot.transform.localScale = Vector3.one;
 
-        _modelRoot.SetActive(true);  
+        _modelRoot.SetActive(true);
 
-        LogModelVisibility();
+        // Force an obvious unlit material for diagnosis.
+        Shader unlitShader = Shader.Find("Unlit/Color");
 
-        LogInfo(  
-            "Camera-relative placement: localPosition=" +  
-            _modelRoot.transform.localPosition +  
-            ", localScale=" +  
-            _modelRoot.transform.localScale +  
-            ", camera=" + _gameCamera.name);  
+        if (unlitShader != null)
+        {
+            Material debugMaterial = new Material(unlitShader);
+            debugMaterial.color = Color.magenta;
+
+            Renderer[] renderers =
+                _modelRoot.GetComponentsInChildren<Renderer>(true);
+
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                    renderers[i].material = debugMaterial;
+            }
+
+            LogInfo("Applied magenta Unlit/Color debug material.");
+        }
+        else
+        {
+            LogWarning("Unlit/Color shader not found.");
+        }
+
+        LogModelVisibility();  
 
         // Temporarily disabled for visibility debugging.  
         // _animationPlayer = ModelAPI.GetAnimationPlayer(_modelRoot);  
