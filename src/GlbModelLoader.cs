@@ -148,8 +148,27 @@ public static GameObject LoadGLB(
         root.transform.localPosition = options.Position;    
         root.transform.localRotation =    
             Quaternion.Euler(options.RotationEuler);    
-        root.transform.localScale = options.Scale;    
+        root.transform.localScale = options.Scale;
 
+        Renderer[] renderers =
+        _modelRoot.GetComponentsInChildren<Renderer>(true);
+
+        LogInfo("Renderer count: " + renderers.Length);
+        
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer r = renderers[i];
+            
+            LogInfo(
+                "Renderer " + i +
+                ": " + r.GetType().Name +
+                ", object=" + r.gameObject.name +
+                ", enabled=" + r.enabled +
+                ", active=" + r.gameObject.activeInHierarchy +
+                ", materials=" + r.sharedMaterials.Length +
+                ", bounds=" + r.bounds);
+        }
+        
         Texture2D[] textures =    
             BuildTextures(doc, options.LoadTextures);    
 
