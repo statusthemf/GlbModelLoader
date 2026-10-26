@@ -1387,34 +1387,53 @@ private static void BuildMesh(
         }    
     }    
 
-    if (skinWeightsApplied)    
-    {    
-        mesh.bindposes =    
-            new Il2CppStructArray<Matrix4x4>(bindPoses);    
+    if (skinWeightsApplied)
+    {
+        mesh.bindposes =
+            new Il2CppStructArray<Matrix4x4>(bindPoses);
 
-        mesh.RecalculateBounds();    
+        mesh.RecalculateBounds();
 
-        SkinnedMeshRenderer renderer =    
-            gameObject.AddComponent<SkinnedMeshRenderer>();    
+        SkinnedMeshRenderer renderer =
+            gameObject.AddComponent<SkinnedMeshRenderer>();
 
-        renderer.sharedMesh = mesh;    
+        renderer.sharedMesh = mesh;
 
-        renderer.bones =    
-            new Il2CppReferenceArray<Transform>(bones);    
+        renderer.bones =
+            new Il2CppReferenceArray<Transform>(bones);
 
-        renderer.rootBone = rootBone;    
+        renderer.rootBone = rootBone;
 
-        renderer.sharedMaterials =    
-            new Il2CppReferenceArray<Material>(    
-                submeshMaterials.ToArray());    
+        renderer.sharedMaterials =
+            new Il2CppReferenceArray<Material>(
+                submeshMaterials.ToArray());
 
-        if (options.CreateColliders)    
-        {    
-            MeshCollider collider =    
-                gameObject.AddComponent<MeshCollider>();    
+        // Ensure the skinned renderer has a usable initial bound.
+        renderer.localBounds = mesh.bounds;
 
-            collider.sharedMesh = mesh;    
-        }    
+        // Prevent animated bounds from being culled while diagnosing
+        // models whose runtime bounds may not be calculated correctly.
+        renderer.updateWhenOffscreen = true;
+
+        renderer.enabled = true;
+        gameObject.SetActive(true);
+
+        DiagnosticLog.LogInfo(
+            "[ULTRADROID Models] Skinned mesh '" + mesh.name +
+            "': vertices=" + mesh.vertexCount +
+            ", submeshes=" + mesh.subMeshCount +
+            ", meshBounds=" + mesh.bounds +
+            ", rendererBounds=" + renderer.localBounds +
+            ", bones=" + bones.Length +
+            ", bindPoses=" + bindPoses.Length);
+
+        if (options.CreateColliders)
+        {
+            MeshCollider collider =
+                gameObject.AddComponent<MeshCollider>();
+
+            collider.sharedMesh = mesh;
+        }
     }    
     else    
     {    
