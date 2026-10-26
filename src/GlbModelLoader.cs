@@ -113,98 +113,120 @@ public static GlbAnimationData[] ReadGLBAnimations(string path)
     return doc.ReadAnimations();    
 }    
 
-public static GameObject LoadGLB(    
-    string path,    
-    Transform parent = null,    
-    ModelLoadOptions options = null)    
-{    
-    if (string.IsNullOrEmpty(path))    
-        throw new ArgumentException(    
-            "A GLB path is required.", "path");    
 
-    if (!File.Exists(path))    
-        throw new FileNotFoundException(    
-            "GLB file was not found.", path);    
 
-    options = options ?? new ModelLoadOptions();    
+public static GameObject LoadGLB(
+    string path,
+    Transform parent = null,
+    ModelLoadOptions options = null)
+{
+    if (string.IsNullOrEmpty(path))
+        throw new ArgumentException(
+            "A GLB path is required.", nameof(path));
 
-    GlbDocument doc =    
-        GlbDocument.Parse(File.ReadAllBytes(path));    
+    if (!File.Exists(path))
+        throw new FileNotFoundException(
+            "GLB file was not found.", path);
 
-    if (doc == null || doc.json == null)    
-        throw new InvalidDataException(    
-            "GLB parser returned an empty document.");    
+    options = options ?? new ModelLoadOptions();
 
-    GameObject root = new GameObject(    
-        string.IsNullOrEmpty(options.Name)    
-            ? Path.GetFileNameWithoutExtension(path)    
-            : options.Name);    
+    GlbDocument doc =
+        GlbDocument.Parse(File.ReadAllBytes(path));
 
-    try    
-    {    
-        if (parent != null)    
-            root.transform.SetParent(parent, false);    
+    if (doc == null || doc.json == null)
+        throw new InvalidDataException(
+            "GLB parser returned an empty document.");
 
-        root.transform.localPosition = options.Position;    
-        root.transform.localRotation =    
-            Quaternion.Euler(options.RotationEuler);    
+    GameObject root = new GameObject(
+        string.IsNullOrEmpty(options.Name)
+            ? Path.GetFileNameWithoutExtension(path)
+            : options.Name);
+
+    try
+    {
+        if (parent != null)
+            root.transform.SetParent(parent, false);
+
+        root.transform.localPosition = options.Position;
+        root.transform.localRotation =
+            Quaternion.Euler(options.RotationEuler);
         root.transform.localScale = options.Scale;
 
-        Renderer[] renderers =
-        _modelRoot.GetComponentsInChildren<Renderer>(true);
+        Texture2D[] textures =
+            BuildTextures(doc, options.LoadTextures);
 
-        LogInfo("Renderer count: " + renderers.Length);
-        
+        Material[] materials =
+            BuildMaterials(doc, textures);
+
+        Transform[] nodeTransforms =
+            BuildScene(doc, root.transform, materials, options);
+
+        // Run diagnostics after BuildScene creates the mesh objects.
+        Renderer[] renderers =
+            root.GetComponentsInChildren<Renderer>(true);
+
+        DiagnosticLog.LogInfo(
+            "[ULTRADROID Models] Renderer count after BuildScene: " +
+            renderers.Length);
+
         for (int i = 0; i < renderers.Length; i++)
         {
-            Renderer r = renderers[i];
-            
-            LogInfo(
-                "Renderer " + i +
-                ": " + r.GetType().Name +
-                ", object=" + r.gameObject.name +
-                ", enabled=" + r.enabled +
-                ", active=" + r.gameObject.activeInHierarchy +
-                ", materials=" + r.sharedMaterials.Length +
-                ", bounds=" + r.bounds);
+            Renderer renderer = renderers[i];
+
+            if (renderer == null)
+            {
+                DiagnosticLog.LogWarning(
+                    "[ULTRADROID Models] Renderer " + i + " is null.");
+                continue;
+            }
+
+            Material[] sharedMaterials = renderer.sharedMaterials;
+
+            DiagnosticLog.LogInfo(
+                "[ULTRADROID Models] Renderer " + i +
+                ": type=" + renderer.GetType().Name +
+                ", object=" + renderer.gameObject.name +
+                ", enabled=" + renderer.enabled +
+                ", active=" + renderer.gameObject.activeInHierarchy +
+                ", materials=" +
+                (sharedMaterials == null ? 0 : sharedMaterials.Length) +
+                ", bounds=" + renderer.bounds);
         }
-        
-        Texture2D[] textures =    
-            BuildTextures(doc, options.LoadTextures);    
 
-        Material[] materials =    
-            BuildMaterials(doc, textures);    
+        GlbAnimationData[] animations;
 
-        // Modified: capture node transforms and create player    
-        Transform[] nodeTransforms =    
-            BuildScene(doc, root.transform, materials, options);    
+        try
+        {
+            animations = doc.ReadAnimations();
+        }
+        catch (Exception ex)
+        {
+            LogError("Could not read model animations.", ex);
+            animations = new GlbAnimationData[0];
+        }
 
-        GlbAnimationData[] animations;    
+        AnimationPlayers[root] = new GlbAnimationPlayer(
+            root,
+            animations,
+            nodeTransforms);
 
-        try    
-        {    
-            animations = doc.ReadAnimations();    
-        }    
-        catch (Exception ex)    
-        {    
-            LogError("Could not read model animations.", ex);    
-            animations = new GlbAnimationData[0];    
-        }    
+        DiagnosticLog.LogInfo(
+            "[ULTRADROID Models] Loaded model '" + root.name +
+            "': nodes=" + nodeTransforms.Length +
+            ", animations=" + animations.Length +
+            ", renderers=" + renderers.Length +
+            ", position=" + root.transform.position +
+            ", scale=" + root.transform.lossyScale);
 
-        AnimationPlayers[root] = new GlbAnimationPlayer(    
-            root,    
-            animations,    
-            nodeTransforms);    
-
-        return root;    
-    }    
-    catch (Exception ex)    
-    {    
-        LogError("LoadGLB failed while building the model.", ex);    
-        UnityEngine.Object.Destroy(root);    
-        throw;    
-    }    
-}    
+        return root;
+    }
+    catch (Exception ex)
+    {
+        LogError("LoadGLB failed while building the model.", ex);
+        UnityEngine.Object.Destroy(root);
+        throw;
+    }
+}
 
 private static int Count<T>(T[] array)    
 {    
