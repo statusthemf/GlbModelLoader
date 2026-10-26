@@ -41,6 +41,7 @@ private const float LoadRetryInterval = 2f;
 
 private GameObject _modelRoot;  
 private GlbAnimationPlayer _animationPlayer;  
+private Camera _gameCamera;  
 
 private string _lastSceneName = string.Empty;  
 private float _nextLoadAttempt;  
@@ -71,6 +72,33 @@ public void Update()
 
     if (IsNonGameplayScene(sceneName))  
         return;  
+
+    if (_modelRoot != null)  
+    {  
+        Camera currentCamera = FindGameCamera();  
+
+        if (currentCamera != null)  
+        {  
+            if (_gameCamera != currentCamera ||  
+                _modelRoot.transform.parent != currentCamera.transform)  
+            {  
+                _gameCamera = currentCamera;  
+
+                _modelRoot.transform.SetParent(  
+                    _gameCamera.transform,  
+                    false);  
+
+                _modelRoot.transform.localPosition =  
+                    new Vector3(0f, 0f, 1f);  
+
+                _modelRoot.transform.localRotation =  
+                    Quaternion.identity;  
+
+                _modelRoot.transform.localScale =  
+                    Vector3.one * 0.1f;  
+            }  
+        }  
+    }  
 
     // Retry until a model can be loaded.  
     if (_modelRoot == null)  
@@ -168,7 +196,12 @@ private void TryLoadModel()
         _modelRoot = loaded;  
         _modelRoot.name = "ULTRADROID_BladesOfChaos";  
 
-        // Camera-attached preview placement.  
+        _gameCamera = camera;  
+
+        _modelRoot.transform.SetParent(  
+            _gameCamera.transform,  
+            false);  
+
         _modelRoot.transform.localPosition =  
             new Vector3(0f, 0f, 1f);  
 
@@ -176,38 +209,23 @@ private void TryLoadModel()
             Quaternion.identity;  
 
         _modelRoot.transform.localScale =  
-            new Vector3(0.1f, 0.1f, 0.1f);  
+            Vector3.one * 0.1f;  
 
-        // Retrieve the animation player registered by LoadGLB.  
-        _animationPlayer =  
-            ModelAPI.GetAnimationPlayer(_modelRoot);  
+        _modelRoot.SetActive(true);  
 
-        if (_animationPlayer == null)  
-        {  
-            LogWarning(  
-                "The model loaded, but no animation player " +  
-                "was registered. The model will remain visible.");  
+        LogModelVisibility();
 
-            LogInfo("GLB model loaded successfully.");  
-            return;  
-        }  
+        LogInfo(  
+            "Camera-relative placement: localPosition=" +  
+            _modelRoot.transform.localPosition +  
+            ", localScale=" +  
+            _modelRoot.transform.localScale +  
+            ", camera=" + _gameCamera.name);  
 
-        if (!_animationPlayer.Play(AnimationName, true))  
-        {  
-            LogWarning(  
-                "The model loaded, but animation '" +  
-                AnimationName +  
-                "' could not be started. Check the animation name.");  
-
-            LogInfo(  
-                "Animation player was created successfully.");  
-        }  
-        else  
-        {  
-            LogInfo(  
-                "Animation '" + AnimationName +  
-                "' started successfully.");  
-        }  
+        // Temporarily disabled for visibility debugging.  
+        // _animationPlayer = ModelAPI.GetAnimationPlayer(_modelRoot);  
+        // if (_animationPlayer != null)  
+        //     _animationPlayer.Play(AnimationName, true);  
 
         LogInfo("GLB model loaded successfully.");  
     }  
@@ -326,6 +344,55 @@ private static string FindModelFile()
 
     return null;  
 }  
+
+private void LogModelVisibility()
+{
+    if (_modelRoot == null)
+        return;
+
+    Renderer[] renderers =
+        _modelRoot.GetComponentsInChildren<Renderer>(true);
+
+    LogInfo(
+        "Visibility check: active=" +
+        _modelRoot.activeInHierarchy +
+        ", camera=" +
+        (_gameCamera != null ? _gameCamera.name : "NULL") +
+        ", rendererCount=" + renderers.Length);
+
+    for (int i = 0; i < renderers.Length; i++)
+    {
+        Renderer renderer = renderers[i];
+
+        if (renderer == null)
+            continue;
+
+        LogInfo(
+            "Renderer " + i +
+            ": name=" + renderer.name +
+            ", enabled=" + renderer.enabled +
+            ", active=" + renderer.gameObject.activeInHierarchy +
+            ", boundsCenter=" + renderer.bounds.center +
+            ", boundsSize=" + renderer.bounds.size +
+            ", materials=" + renderer.sharedMaterials.Length);
+
+        Material[] materials = renderer.sharedMaterials;
+
+        for (int j = 0; j < materials.Length; j++)
+        {
+            Material material = materials[j];
+
+            LogInfo(
+                "Material " + j + ": " +
+                (material != null
+                    ? material.name + ", shader=" +
+                      (material.shader != null
+                          ? material.shader.name
+                          : "NULL")
+                    : "NULL"));
+        }
+    }
+}
 
 private void ReportLoadProblem(string message)  
 {  
