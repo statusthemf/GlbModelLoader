@@ -66,7 +66,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         if (IsNonGameplayScene(sceneName))
             return;
 
-        // Keep the model attached to the current game camera.
         if (_modelRoot != null)
         {
             Camera currentCamera = FindGameCamera();
@@ -82,6 +81,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                     false);
 
                 ApplyDebugPlacement();
+
                 LogInfo("Model reattached to camera: " + _gameCamera.name);
                 LogCameraVisibility();
             }
@@ -100,8 +100,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             return;
         }
 
-        // Keep animation disabled during visibility debugging.
-        // Once the mesh is visible, restore animation playback.
+        // Animation remains disabled during visibility debugging.
         if (_animationPlayer != null)
         {
             _animationPlayer.Update(Time.deltaTime);
@@ -191,11 +190,12 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 ", localScale=" + _modelRoot.transform.localScale +
                 ", camera=" + _gameCamera.name);
 
+            ApplyDebugMaterial();
             CheckAvailableShaders();
             LogModelVisibility();
             LogCameraVisibility();
 
-            // Animation intentionally disabled for this test.
+            // Keep animation disabled until the mesh is visible.
             // _animationPlayer = ModelAPI.GetAnimationPlayer(_modelRoot);
             // if (_animationPlayer != null)
             //     _animationPlayer.Play(AnimationName, true);
@@ -220,10 +220,46 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         if (_modelRoot == null)
             return;
 
-        // Temporary diagnostic placement: two units in front of the camera.
         _modelRoot.transform.localPosition = new Vector3(0f, 0f, 2f);
         _modelRoot.transform.localRotation = Quaternion.identity;
         _modelRoot.transform.localScale = Vector3.one;
+    }
+
+    private void ApplyDebugMaterial()
+    {
+        if (_modelRoot == null)
+            return;
+
+        Shader shader = Shader.Find("Sprites/Default");
+
+        if (shader == null)
+        {
+            LogWarning("Sprites/Default shader is unavailable.");
+            return;
+        }
+
+        Material debugMaterial = new Material(shader);
+        debugMaterial.color = Color.magenta;
+
+        Renderer[] renderers =
+            _modelRoot.GetComponentsInChildren<Renderer>(true);
+
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+
+            if (renderer == null)
+                continue;
+
+            Material[] materials = renderer.sharedMaterials;
+
+            for (int j = 0; j < materials.Length; j++)
+                materials[j] = debugMaterial;
+
+            renderer.sharedMaterials = materials;
+        }
+
+        LogInfo("Applied magenta Sprites/Default material.");
     }
 
     private void CheckAvailableShaders()
