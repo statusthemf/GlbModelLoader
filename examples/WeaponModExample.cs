@@ -100,15 +100,10 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             return;
         }
 
-        // Animation remains disabled during visibility debugging.
         if (_animationPlayer != null)
-        {
             _animationPlayer.Update(Time.deltaTime);
-        }
-        else
-        {
-            ModelAPI.UpdateCpuSkinning(_modelRoot);
-        }
+
+        ModelAPI.UpdateCpuSkinning(_modelRoot);
     }
 
     private static bool IsNonGameplayScene(string sceneName)
@@ -158,7 +153,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             {
                 LoadTextures = true,
                 FlipUvV = true,
-                ForceStaticMeshTest = true
+                ForceStaticMeshTest = false
             };
 
             LogInfo("Loading GLB: " + modelPath);
@@ -191,15 +186,16 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
                 ", localScale=" + _modelRoot.transform.localScale +
                 ", camera=" + _gameCamera.name);
 
-            ApplyDebugMaterial();
             CheckAvailableShaders();
             LogModelVisibility();
             LogCameraVisibility();
 
-            // Keep animation disabled until the mesh is visible.
-            // _animationPlayer = ModelAPI.GetAnimationPlayer(_modelRoot);
-            // if (_animationPlayer != null)
-            //     _animationPlayer.Play(AnimationName, true);
+            _animationPlayer = ModelAPI.GetAnimationPlayer(_modelRoot);
+
+            if (_animationPlayer != null)
+                _animationPlayer.Play(AnimationName, true);
+            else
+                LogWarning("No animation player was created for the model.");
 
             LogInfo("GLB model loaded successfully.");
         }
@@ -224,43 +220,6 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         _modelRoot.transform.localPosition = new Vector3(0f, 0f, 2f);
         _modelRoot.transform.localRotation = Quaternion.identity;
         _modelRoot.transform.localScale = Vector3.one;
-    }
-
-    private void ApplyDebugMaterial()
-    {
-        if (_modelRoot == null)
-            return;
-
-        Shader shader = Shader.Find("Sprites/Default");
-
-        if (shader == null)
-        {
-            LogWarning("Sprites/Default shader is unavailable.");
-            return;
-        }
-
-        Material debugMaterial = new Material(shader);
-        debugMaterial.color = Color.magenta;
-
-        Renderer[] renderers =
-            _modelRoot.GetComponentsInChildren<Renderer>(true);
-
-        for (int i = 0; i < renderers.Length; i++)
-        {
-            Renderer renderer = renderers[i];
-
-            if (renderer == null)
-                continue;
-
-            Material[] materials = renderer.sharedMaterials;
-
-            for (int j = 0; j < materials.Length; j++)
-                materials[j] = debugMaterial;
-
-            renderer.sharedMaterials = materials;
-        }
-
-        LogInfo("Applied magenta Sprites/Default material.");
     }
 
     private void CheckAvailableShaders()
