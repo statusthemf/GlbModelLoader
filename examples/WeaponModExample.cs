@@ -1,480 +1,494 @@
-
 using System;
-using System.Collections.Generic;
 using System.IO;
 using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
+using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.Injection;
+using ULTRADROID.Models;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using ULTRADROID.Models;
 
-[BepInPlugin(
-    "ultradroid.bladesofchaos",
-    "ULTRADROID Blades of Chaos",
-    "0.6.0")]
-public sealed class BladesOfChaosPlugin : BasePlugin
+namespace ULTRADROID.Models.Test
 {
-    public override void Load()
+    [BepInPlugin(
+        "somerandommaid.ultradroid.models.test",
+        "ULTRADROID Models Test",
+        "0.3.1")]
+    [BepInDependency("somerandommaid.ultradroid.models")]
+    public class ModelsTestPlugin : BasePlugin
     {
-        BladesOfChaosRunner.PluginLog = Log;
+        internal static ManualLogSource Log;
 
-        ClassInjector.RegisterTypeInIl2Cpp<BladesOfChaosRunner>();
-        AddComponent<BladesOfChaosRunner>();
+        internal const string ModelPath =
+            "/storage/emulated/0/BepInEx_Android/com.aarongamingdev.ULTRAKILL/modpacks/import models test/plugins/ULTRADROID.BladesOfChaos/blades_of_chaos_god.glb";
 
-        Log.LogInfo("ULTRADROID Blades of Chaos example loaded.");
-    }
-}
-
-public sealed class BladesOfChaosRunner : MonoBehaviour
-{
-    internal static ManualLogSource PluginLog;
-
-    private const string ModelFileName = "blades_of_chaos_god.glb";
-    private const string AnimationName = "Bow";
-    private const float LoadRetryInterval = 2f;
-
-    private GameObject _modelRoot;
-    private GlbAnimationPlayer _animationPlayer;
-    private Camera _gameCamera;
-
-    private string _lastSceneName = string.Empty;
-    private float _nextLoadAttempt;
-    private bool _loadErrorReported;
-
-    public BladesOfChaosRunner(IntPtr ptr) : base(ptr)
-    {
-    }
-
-    public void Update()
-    {
-        string sceneName = SceneManager.GetActiveScene().name;
-
-        if (!string.Equals(
-            sceneName,
-            _lastSceneName,
-            StringComparison.Ordinal))
+        public override void Load()
         {
-            _lastSceneName = sceneName;
-            ClearLoadedModel();
+            Log = base.Log;
 
-            _nextLoadAttempt = 0f;
-            _loadErrorReported = false;
-        }
+            Log.LogInfo("========================================");
+            Log.LogInfo("ULTRADROID Models Test 0.3.1 starting.");
+            Log.LogInfo($"Models API version: {ModelAPI.Version}");
+            Log.LogInfo($"Model path: {ModelPath}");
+            Log.LogInfo($"Model file exists: {File.Exists(ModelPath)}");
 
-        if (IsNonGameplayScene(sceneName))
-            return;
-
-        if (_modelRoot != null)
-        {
-            Camera currentCamera = FindGameCamera();
-
-            if (currentCamera != null &&
-                (_gameCamera != currentCamera ||
-                 _modelRoot.transform.parent != currentCamera.transform))
+            if (File.Exists(ModelPath))
             {
-                _gameCamera = currentCamera;
-
-                _modelRoot.transform.SetParent(
-                    _gameCamera.transform,
-                    false);
-
-                ApplyDebugPlacement();
-
-                LogInfo("Model reattached to camera: " + _gameCamera.name);
-                LogCameraVisibility();
-            }
-        }
-
-        if (_modelRoot == null)
-        {
-            if (Time.unscaledTime >= _nextLoadAttempt)
-            {
-                _nextLoadAttempt =
-                    Time.unscaledTime + LoadRetryInterval;
-
-                TryLoadModel();
+                Log.LogInfo(
+                    $"Model file size: {new FileInfo(ModelPath).Length} bytes.");
             }
 
-            return;
-        }
-
-        if (_animationPlayer != null)
-            _animationPlayer.Update(Time.unscaledDeltaTime);
-
-        ModelAPI.UpdateCpuSkinning(_modelRoot);
-    }
-
-    private static bool IsNonGameplayScene(string sceneName)
-    {
-        if (string.IsNullOrEmpty(sceneName))
-            return true;
-
-        string scene = sceneName.ToLowerInvariant();
-
-        return scene.Contains("bootstrap") ||
-               scene == "intro" ||
-               scene.Contains("mainmenu") ||
-               scene.Contains("main_menu") ||
-               scene.Contains("main menu") ||
-               scene.Contains("title") ||
-               scene.Contains("loading") ||
-               scene.Contains("credits") ||
-               scene.Contains("ending");
-    }
-
-    private void TryLoadModel()
-    {
-        string modelPath = FindModelFile();
-
-        if (string.IsNullOrEmpty(modelPath))
-        {
-            ReportLoadProblem(
-                "Could not find " + ModelFileName +
-                ". Place it beside the plugin DLL, inside its assets folder, " +
-                "or in the supported plugin folders.");
-            return;
-        }
-
-        Camera camera = FindGameCamera();
-
-        if (camera == null)
-        {
-            ReportLoadProblem("No active game camera was found. Will retry.");
-            return;
-        }
-
-        GameObject loaded = null;
-
-        try
-        {
-            ModelLoadOptions options = new ModelLoadOptions
+            try
             {
-                LoadTextures = true,
-                FlipUvV = true,
-                ForceStaticMeshTest = true,
-            };
+                ClassInjector.RegisterTypeInIl2Cpp<ModelTestLoader>();
 
-            LogInfo("Loading GLB: " + modelPath);
+                GameObject host = new GameObject(
+                    "ULTRADROID_Models_Test_Runtime");
 
-            loaded = ModelAPI.LoadGLB(
-                modelPath,
-                camera.transform,
-                options);
+                UnityEngine.Object.DontDestroyOnLoad(host);
+                host.AddComponent<ModelTestLoader>();
 
-            if (loaded == null)
+                Log.LogInfo("Diagnostic runtime component registered.");
+                Log.LogInfo("Waiting for scene diagnostics...");
+            }
+            catch (Exception ex)
             {
-                ReportLoadProblem("ModelAPI.LoadGLB returned null.");
-                return;
+                Log.LogError($"Failed to initialize runtime: {ex}");
             }
 
-            _modelRoot = loaded;
-            _modelRoot.name = "ULTRADROID_BladesOfChaos";
-            _gameCamera = camera;
+            Log.LogInfo("========================================");
+        }
+    }
 
-            _modelRoot.transform.SetParent(
-                _gameCamera.transform,
-                false);
+    public class ModelTestLoader : MonoBehaviour
+    {
+        private float nextDiagnosticTime;
+        private float nextModelAttemptTime;
 
-            ApplyDebugPlacement();
-            _modelRoot.SetActive(true);
+        private string lastSceneName = string.Empty;
+        private string detectedGameplayScene = "";
 
-            LogInfo(
-                "Camera-relative placement: localPosition=" +
-                _modelRoot.transform.localPosition +
-                ", localScale=" + _modelRoot.transform.localScale +
-                ", camera=" + _gameCamera.name);
+        private bool gameplayDetected;
+        private bool modelLoadAttempted;
 
-            CheckAvailableShaders();
-            LogModelVisibility();
-            LogCameraVisibility();
+        private Camera currentCamera;
+        private ModelInstance instance;
 
-            _animationPlayer = ModelAPI.GetAnimationPlayer(_modelRoot);
+        public ModelTestLoader(IntPtr ptr) : base(ptr)
+        {
+        }
 
-            if (_animationPlayer == null)
-            {
-                LogWarning("No animation player was created for the model.");
-            }
-            else if (!_animationPlayer.Play(AnimationName, true))
-            {
-                LogWarning(
-                    "Animation '" + AnimationName +
-                    "' could not be started. Check the GLB animation names and tracks.");
-            }
-            else
-            {
-                LogInfo(
-                    "Started animation '" +
-                    _animationPlayer.CurrentAnimationName +
-                    "'; duration=" + _animationPlayer.Duration +
-                    "s; playing=" + _animationPlayer.IsPlaying);
+        private void Awake()
+        {
+            ModelsTestPlugin.Log.LogInfo(
+                "[Runtime] Awake called. Component is alive.");
+        }
+        
+        private void OnEnable()
+        {
+            ModelsTestPlugin.Log.LogInfo(
+                "[Runtime] OnEnable called.");
+                
+            LogCurrentScenes("OnEnable");
             }
 
-            LogInfo("GLB model loaded successfully.");
-        }
-        catch (Exception ex)
-        {
-            LogError("Failed to load or initialize the GLB model: " + ex);
-
-            if (loaded != null)
-                UnityEngine.Object.Destroy(loaded);
-
-            _modelRoot = null;
-            _animationPlayer = null;
-            _gameCamera = null;
-        }
-    }
-
-    private void ApplyDebugPlacement()
-    {
-        if (_modelRoot == null)
-            return;
-
-        _modelRoot.transform.localPosition = new Vector3(0f, 0f, 2f);
-        _modelRoot.transform.localRotation = Quaternion.identity;
-        _modelRoot.transform.localScale = Vector3.one;
-    }
-
-    private void CheckAvailableShaders()
-    {
-        string[] shaderNames =
-        {
-            "Sprites/Default",
-            "Unlit/Texture",
-            "Unlit/Color",
-            "Universal Render Pipeline/Unlit",
-            "Universal Render Pipeline/Lit",
-            "Standard"
-        };
-
-        for (int i = 0; i < shaderNames.Length; i++)
-        {
-            Shader shader = Shader.Find(shaderNames[i]);
-
-            LogInfo(
-                "Shader check: " + shaderNames[i] +
-                " = " + (shader != null ? "FOUND" : "MISSING"));
-        }
-    }
-
-    private void LogModelVisibility()
-    {
-        if (_modelRoot == null)
-            return;
-
-        Renderer[] renderers =
-            _modelRoot.GetComponentsInChildren<Renderer>(true);
-
-        LogInfo(
-            "Visibility check: active=" +
-            _modelRoot.activeInHierarchy +
-            ", camera=" +
-            (_gameCamera != null ? _gameCamera.name : "NULL") +
-            ", rendererCount=" + renderers.Length);
-
-        for (int i = 0; i < renderers.Length; i++)
-        {
-            Renderer renderer = renderers[i];
-
-            if (renderer == null)
-                continue;
-
-            LogInfo(
-                "Renderer " + i +
-                ": name=" + renderer.name +
-                ", enabled=" + renderer.enabled +
-                ", active=" + renderer.gameObject.activeInHierarchy +
-                ", layer=" + renderer.gameObject.layer +
-                ", boundsCenter=" + renderer.bounds.center +
-                ", boundsSize=" + renderer.bounds.size +
-                ", materials=" + renderer.sharedMaterials.Length);
-
-            Material[] materials = renderer.sharedMaterials;
-
-            for (int j = 0; j < materials.Length; j++)
-            {
-                Material material = materials[j];
-
-                LogInfo(
-                    "Material " + j + ": " +
-                    (material != null
-                        ? material.name + ", shader=" +
-                          (material.shader != null
-                              ? material.shader.name
-                              : "NULL")
-                        : "NULL"));
-            }
-        }
-    }
-
-    private void LogCameraVisibility()
-    {
-        if (_gameCamera == null || _modelRoot == null)
-            return;
-
-        LogInfo(
-            "Camera position=" + _gameCamera.transform.position +
-            ", forward=" + _gameCamera.transform.forward +
-            ", near=" + _gameCamera.nearClipPlane +
-            ", far=" + _gameCamera.farClipPlane +
-            ", cullingMask=" + _gameCamera.cullingMask);
-
-        Renderer[] renderers =
-            _modelRoot.GetComponentsInChildren<Renderer>(true);
-
-        for (int i = 0; i < renderers.Length; i++)
-        {
-            Renderer renderer = renderers[i];
-
-            if (renderer == null)
-                continue;
-
-            Vector3 center = renderer.bounds.center;
-            Vector3 viewport =
-                _gameCamera.WorldToViewportPoint(center);
-
-            bool layerVisible =
-                (_gameCamera.cullingMask &
-                 (1 << renderer.gameObject.layer)) != 0;
-
-            LogInfo(
-                "Camera test " + i +
-                ": viewport=" + viewport +
-                ", layer=" + renderer.gameObject.layer +
-                ", layerVisible=" + layerVisible +
-                ", rendererEnabled=" + renderer.enabled +
-                ", meshCenter=" + center);
-        }
-    }
-
-    private static Camera FindGameCamera()
-    {
-        Camera main = Camera.main;
-
-        if (main != null && main.isActiveAndEnabled)
-            return main;
-
-        Camera[] cameras = Camera.allCameras;
-
-        if (cameras == null)
-            return null;
-
-        for (int i = 0; i < cameras.Length; i++)
-        {
-            Camera candidate = cameras[i];
-
-            if (candidate != null && candidate.isActiveAndEnabled)
-                return candidate;
-        }
-
-        return null;
-    }
-
-    private static string FindModelFile()
-    {
-        List<string> candidates = new List<string>();
-
-        try
-        {
-            string assemblyDirectory =
-                Path.GetDirectoryName(
-                    typeof(BladesOfChaosPlugin).Assembly.Location);
-
-            if (!string.IsNullOrEmpty(assemblyDirectory))
-            {
-                candidates.Add(
-                    Path.Combine(assemblyDirectory, ModelFileName));
-
-                candidates.Add(
-                    Path.Combine(assemblyDirectory, "assets", ModelFileName));
-
-                candidates.Add(
-                    Path.Combine(assemblyDirectory, "Assets", ModelFileName));
-            }
-        }
-        catch
-        {
-            // Continue checking plugin directories.
-        }
-
-        try
-        {
-            candidates.Add(
-                Path.Combine(Paths.PluginPath, ModelFileName));
-
-            candidates.Add(
-                Path.Combine(
-                    Paths.PluginPath,
-                    "BladesOfChaos",
-                    ModelFileName));
-
-            candidates.Add(
-                Path.Combine(
-                    Paths.PluginPath,
-                    "ULTRADROID.BladesOfChaos",
-                    ModelFileName));
-        }
-        catch
-        {
-            // Other candidate locations may still work.
-        }
-
-        for (int i = 0; i < candidates.Count; i++)
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             try
             {
-                if (File.Exists(candidates[i]))
-                    return candidates[i];
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[SceneEvent] Scene loaded: '{scene.name}', " +
+                    $"mode={mode}, loaded={scene.isLoaded}");
+
+                if (IsPlayableSceneName(scene.name))
+                    OnGameplaySceneDetected(scene.name);
             }
-            catch
+            catch (Exception ex)
             {
-                // Try the next candidate.
+                ModelsTestPlugin.Log.LogError(
+                    $"[SceneEvent] Error: {ex}");
             }
         }
 
-        return null;
-    }
+        public void Update()
+        {
+            try
+            {
+                string sceneName = SceneManager.GetActiveScene().name;
 
-    private void ReportLoadProblem(string message)
-    {
-        if (_loadErrorReported)
-            return;
+                if (!string.Equals(
+                    sceneName,
+                    lastSceneName,
+                    StringComparison.Ordinal))
+                {
+                    ModelsTestPlugin.Log.LogInfo(
+                        "[Scene] Active scene changed: '" +
+                        lastSceneName + "' -> '" +
+                        sceneName + "'");
 
-        _loadErrorReported = true;
-        LogWarning(message);
-    }
+                    lastSceneName = sceneName;
 
-    private void ClearLoadedModel()
-    {
-        if (_modelRoot != null)
-            UnityEngine.Object.Destroy(_modelRoot);
+                    gameplayDetected = false;
+                    modelLoadAttempted = false;
+                    nextModelAttemptTime = 0f;
 
-        _modelRoot = null;
-        _animationPlayer = null;
-        _gameCamera = null;
-    }
+                    DestroyCurrentModel();
+                    currentCamera = null;
+                }
 
-    public void OnDestroy()
-    {
-        ClearLoadedModel();
-    }
+                if (IsNonGameplayScene(sceneName))
+                    return;
 
-    private static void LogInfo(string message)
-    {
-        if (PluginLog != null)
-            PluginLog.LogInfo("[Blades of Chaos] " + message);
-    }
+                gameplayDetected = true;
+                detectedGameplayScene = sceneName;
 
-    private static void LogWarning(string message)
-    {
-        if (PluginLog != null)
-            PluginLog.LogWarning("[Blades of Chaos] " + message);
-    }
+                // This heartbeat must appear every three seconds if Update runs.
+                if (Time.unscaledTime >= nextDiagnosticTime)
+                {
+                    nextDiagnosticTime = Time.unscaledTime + 3f;
 
-    private static void LogError(string message)
-    {
-        if (PluginLog != null)
-            PluginLog.LogError("[Blades of Chaos] " + message);
+                    ModelsTestPlugin.Log.LogInfo(
+                        "[Heartbeat] ModelTestLoader.Update IS RUNNING.");
+
+                    LogCurrentScenes("Heartbeat");
+                }
+
+                if (!gameplayDetected || modelLoadAttempted)
+                    return;
+
+                if (Time.unscaledTime < nextModelAttemptTime)
+                    return;
+
+                TryLoadModel();
+            }
+            catch (Exception ex)
+            {
+                ModelsTestPlugin.Log.LogError(
+                    $"[Runtime] Update exception: {ex}");
+            }
+        }
+
+        private void LogCurrentScenes(string source)
+        {
+            try
+            {
+                Scene active = SceneManager.GetActiveScene();
+
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[Scene:{source}] Active='{active.name}', " +
+                    $"valid={active.IsValid()}, loaded={active.isLoaded}, " +
+                    $"sceneCount={SceneManager.sceneCount}");
+
+                for (int i = 0; i < SceneManager.sceneCount; i++)
+                {
+                    Scene scene = SceneManager.GetSceneAt(i);
+
+                    ModelsTestPlugin.Log.LogInfo(
+                        $"[Scene:{source}] [{i}] '{scene.name}', " +
+                        $"valid={scene.IsValid()}, loaded={scene.isLoaded}");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModelsTestPlugin.Log.LogError(
+                    $"[Scene:{source}] Scene inspection failed: {ex}");
+            }
+        }
+
+        private void DiagnoseActiveScene()
+        {
+            Scene active = SceneManager.GetActiveScene();
+
+            string activeName = active.IsValid()
+                ? active.name
+                : "<invalid>";
+
+            if (activeName != lastSceneName)
+            {
+                lastSceneName = activeName;
+
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[ScenePoll] Active scene changed: '{activeName}'");
+            }
+
+            if (IsPlayableSceneName(activeName))
+                OnGameplaySceneDetected(activeName);
+
+            // Also search loaded scenes in case gameplay is additive.
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                Scene scene = SceneManager.GetSceneAt(i);
+
+                if (scene.IsValid() &&
+                    scene.isLoaded &&
+                    IsPlayableSceneName(scene.name))
+                {
+                    OnGameplaySceneDetected(scene.name);
+                    break;
+                }
+            }
+        }
+
+        private bool IsPlayableSceneName(string sceneName)
+        {
+            if (string.IsNullOrWhiteSpace(sceneName))
+                return false;
+
+            string name = sceneName.Trim();
+
+            if (string.Equals(
+                name, "uk_construct",
+                StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (name.StartsWith(
+                "Level ",
+                StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Examples: 0-1, P-1, A-1, E-1.
+            if (name.Length == 3 &&
+                name[1] == '-' &&
+                char.IsDigit(name[2]))
+            {
+                char prefix = char.ToUpperInvariant(name[0]);
+
+                return char.IsDigit(prefix) ||
+                       prefix == 'P' ||
+                       prefix == 'A' ||
+                       prefix == 'E';
+            }
+
+            return false;
+        }
+
+        private void OnGameplaySceneDetected(string sceneName)
+        {
+            if (gameplayDetected &&
+                string.Equals(
+                    detectedGameplayScene,
+                    sceneName,
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+
+            ModelsTestPlugin.Log.LogInfo(
+                $"[Gameplay] Recognized candidate scene: '{sceneName}'");
+
+            detectedGameplayScene = sceneName;
+            gameplayDetected = true;
+            modelLoadAttempted = false;
+
+            // Allow the game a little time to initialize its camera.
+            nextModelAttemptTime = Time.unscaledTime + 2f;
+
+            currentCamera = null;
+            DestroyCurrentModel();
+
+            ModelsTestPlugin.Log.LogInfo(
+                "[Gameplay] Model load scheduled in two seconds.");
+        }
+
+        private static bool IsNonGameplayScene(string sceneName)
+        {
+            if (string.IsNullOrEmpty(sceneName))
+                return true;
+
+            string scene = sceneName.ToLowerInvariant();
+
+            return scene.Contains("bootstrap") ||
+                   scene == "intro" ||
+                   scene.Contains("mainmenu") ||
+                   scene.Contains("main_menu") ||
+                   scene.Contains("main menu") ||
+                   scene.Contains("title") ||
+                   scene.Contains("loading") ||
+                   scene.Contains("credits") ||
+                   scene.Contains("ending");
+        }
+
+        private Camera FindUsableCamera()
+        {
+            Camera main = Camera.main;
+
+            if (main != null && main.isActiveAndEnabled)
+            {
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[Camera] Camera.main='{main.name}'");
+
+                return main;
+            }
+
+            Camera[] cameras = FindObjectsOfType<Camera>();
+
+            ModelsTestPlugin.Log.LogInfo(
+                $"[Camera] Found {cameras.Length} camera(s).");
+
+            foreach (Camera camera in cameras)
+            {
+                if (camera == null || !camera.isActiveAndEnabled)
+                    continue;
+
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[Camera] Candidate='{camera.name}', " +
+                    $"tag='{camera.tag}', " +
+                    $"position={camera.transform.position}");
+
+                if (camera.CompareTag("MainCamera"))
+                    return camera;
+            }
+
+            foreach (Camera camera in cameras)
+            {
+                if (camera != null && camera.isActiveAndEnabled)
+                    return camera;
+            }
+
+            return null;
+        }
+
+        private void TryLoadModel()
+        {
+            ModelsTestPlugin.Log.LogInfo(
+                $"[Model] Attempting load in '{detectedGameplayScene}'.");
+
+            if (!File.Exists(ModelsTestPlugin.ModelPath))
+            {
+                modelLoadAttempted = true;
+
+                ModelsTestPlugin.Log.LogError(
+                    $"[Model] File missing: {ModelsTestPlugin.ModelPath}");
+
+                return;
+            }
+
+            currentCamera = FindUsableCamera();
+
+            if (currentCamera == null)
+            {
+                ModelsTestPlugin.Log.LogWarning(
+                    "[Camera] No usable camera yet. Retrying in three seconds.");
+
+                nextModelAttemptTime = Time.unscaledTime + 3f;
+                return;
+            }
+
+            modelLoadAttempted = true;
+
+            try
+            {
+                ModelsTestPlugin.Log.LogInfo(
+                    "[Model] Calling ModelAPI.LoadGLB...");
+
+                ModelLoadOptions options = new ModelLoadOptions
+                {
+                    Name = "BladesOfChaosTest",
+                    Parent = currentCamera.transform,
+                    Position = new Vector3(0f, 0f, 2f),
+                    RotationEuler = Vector3.zero,
+                    Scale = new Vector3(0.1f, 0.1f, 0.1f)
+                };
+
+                instance = ModelAPI.LoadGLB(
+                    ModelsTestPlugin.ModelPath,
+                    options);
+
+                if (instance == null || instance.Root == null)
+                {
+                    ModelsTestPlugin.Log.LogError(
+                        "[Model] LoadGLB returned no valid root.");
+
+                    return;
+                }
+
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[Model] LOAD SUCCESS: '{instance.Root.name}'");
+
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[Model] Camera='{currentCamera.name}', " +
+                    $"position={currentCamera.transform.position}");
+
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[Model] Root local position=" +
+                    $"{instance.Root.transform.localPosition}, " +
+                    $"scale={instance.Root.transform.localScale}");
+
+                LogModelRenderers(instance.Root);
+            }
+            catch (Exception ex)
+            {
+                ModelsTestPlugin.Log.LogError(
+                    $"[Model] LOAD FAILED: {ex}");
+            }
+        }
+
+        private void LogModelRenderers(GameObject root)
+        {
+            Renderer[] renderers =
+                root.GetComponentsInChildren<Renderer>(true);
+
+            MeshFilter[] filters =
+                root.GetComponentsInChildren<MeshFilter>(true);
+
+            ModelsTestPlugin.Log.LogInfo(
+                $"[Model] Renderers={renderers.Length}, " +
+                $"MeshFilters={filters.Length}");
+
+            foreach (Renderer renderer in renderers)
+            {
+                if (renderer == null)
+                    continue;
+
+                ModelsTestPlugin.Log.LogInfo(
+                    $"[Renderer] '{renderer.name}', " +
+                    $"enabled={renderer.enabled}, " +
+                    $"active={renderer.gameObject.activeInHierarchy}, " +
+                    $"bounds={renderer.bounds}");
+            }
+
+            foreach (MeshFilter filter in filters)
+            {
+                if (filter == null)
+                    continue;
+
+                Mesh mesh = filter.sharedMesh;
+
+                ModelsTestPlugin.Log.LogInfo(
+                    mesh == null
+                        ? $"[Mesh] '{filter.name}' has NO mesh."
+                        : $"[Mesh] '{filter.name}', " +
+                          $"vertices={mesh.vertexCount}, " +
+                          $"submeshes={mesh.subMeshCount}");
+            }
+        }
+        
+        private void OnDisable()
+        {
+            ModelsTestPlugin.Log.LogInfo(
+                "[Runtime] OnDisable called.");
+        }
+
+        private void OnDestroy()
+        {
+            DestroyCurrentModel();
+        }
+
+        private void DestroyCurrentModel()
+        {
+            if (instance == null)
+                return;
+
+            try
+            {
+                instance.Destroy();
+            }
+            catch (Exception ex)
+            {
+                ModelsTestPlugin.Log.LogWarning(
+                    $"[Model] Destroy failed: {ex}");
+            }
+
+            instance = null;
+        }
     }
 }
