@@ -131,13 +131,19 @@ namespace ULTRADROID.Models
             if (animation == null)
                 return false;
 
-            _currentAnimation = animation;
+            CachedTrack[] tracks;
 
-            if (!_trackCache.TryGetValue(animation, out _currentTracks))
+            if (!_trackCache.TryGetValue(animation, out tracks))
             {
-                _currentTracks = BuildTrackCache(animation);
-                _trackCache[animation] = _currentTracks;
+                tracks = BuildTrackCache(animation);
+                _trackCache[animation] = tracks;
             }
+
+            if (tracks == null || tracks.Length == 0)
+                return false;
+
+            _currentAnimation = animation;
+            _currentTracks = tracks;
 
             if (!_durationCache.TryGetValue(
                 animation, out _currentDuration))
