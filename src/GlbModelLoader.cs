@@ -1380,18 +1380,6 @@ private static void BuildMesh(
     bool forceStaticMeshTest =
         options != null && options.ForceStaticMeshTest;
 
-    if (forceStaticMeshTest)
-    {
-        Material testMaterial = CreateStaticTestMaterial();
-
-        for (int i = 0; i < submeshMaterials.Count; i++)
-            submeshMaterials[i] = testMaterial;
-
-        DiagnosticLog.LogWarning(
-            "[ULTRADROID Models] TEST A: forcing static rendering for '" +
-            gameObject.name + "'.");
-    }
-
     bool skinDataReady =    
         skinned &&    
         hasBoneWeights &&    
