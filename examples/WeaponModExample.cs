@@ -157,7 +157,8 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
             ModelLoadOptions options = new ModelLoadOptions
             {
                 LoadTextures = true,
-                FlipUvV = true
+                FlipUvV = true,
+                ForceStaticMeshTest = true
             };
 
             LogInfo("Loading GLB: " + modelPath);
