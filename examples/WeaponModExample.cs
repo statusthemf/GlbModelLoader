@@ -101,7 +101,7 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
         }
 
         if (_animationPlayer != null)
-            _animationPlayer.Update(Time.deltaTime);
+            _animationPlayer.Update(Time.unscaledDeltaTime);
 
         ModelAPI.UpdateCpuSkinning(_modelRoot);
     }
@@ -192,10 +192,24 @@ public sealed class BladesOfChaosRunner : MonoBehaviour
 
             _animationPlayer = ModelAPI.GetAnimationPlayer(_modelRoot);
 
-            if (_animationPlayer != null)
-                _animationPlayer.Play(AnimationName, true);
-            else
+            if (_animationPlayer == null)
+            {
                 LogWarning("No animation player was created for the model.");
+            }
+            else if (!_animationPlayer.Play(AnimationName, true))
+            {
+                LogWarning(
+                    "Animation '" + AnimationName +
+                    "' could not be started. Check the GLB animation names and tracks.");
+            }
+            else
+            {
+                LogInfo(
+                    "Started animation '" +
+                    _animationPlayer.CurrentAnimationName +
+                    "'; duration=" + _animationPlayer.Duration +
+                    "s; playing=" + _animationPlayer.IsPlaying);
+            }
 
             LogInfo("GLB model loaded successfully.");
         }
