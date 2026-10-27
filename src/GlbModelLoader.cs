@@ -19,6 +19,8 @@ public Vector3 Scale = Vector3.one;
 public bool LoadTextures = true;
 public bool CreateColliders = false;
 public bool FlipUvV = true;
+// TEST A: bypass skeletal rendering and use a normal MeshRenderer.
+public bool ForceStaticMeshTest = false;
 }
 
 [Serializable]
@@ -96,6 +98,33 @@ private static void LogError(string message, Exception ex)
         "[ULTRADROID Models] " + message +    
         (ex == null ? "" : "\n" + ex));    
 }    
+
+private static Material CreateStaticTestMaterial()
+{
+    Shader shader = Shader.Find("Sprites/Default");
+
+    if (shader == null)
+        shader = Shader.Find("Unlit/Texture");
+
+    if (shader == null)
+        shader = Shader.Find("Standard");
+
+    if (shader == null)
+        throw new InvalidOperationException(
+            "No shader available for Test A.");
+
+    Material material = new Material(shader);
+    material.name = "ULTRADROID_TEST_A_Magenta";
+    material.color = new Color(1f, 0f, 1f, 1f);
+
+    if (material.HasProperty("_Color"))
+        material.SetColor("_Color", Color.magenta);
+
+    if (material.HasProperty("_BaseColor"))
+        material.SetColor("_BaseColor", Color.magenta);
+
+    return material;
+}
 
 public static GlbAnimationData[] ReadGLBAnimations(string path)    
 {    
@@ -1348,6 +1377,21 @@ private static void BuildMesh(
     }    
 
     // ---------- SAFE SKIN / FALLBACK BLOCK ----------    
+    bool forceStaticMeshTest =
+        options != null && options.ForceStaticMeshTest;
+
+    if (forceStaticMeshTest)
+    {
+        Material testMaterial = CreateStaticTestMaterial();
+
+        for (int i = 0; i < submeshMaterials.Count; i++)
+            submeshMaterials[i] = testMaterial;
+
+        DiagnosticLog.LogWarning(
+            "[ULTRADROID Models] TEST A: forcing static rendering for '" +
+            gameObject.name + "'.");
+    }
+
     bool skinDataReady =    
         skinned &&    
         hasBoneWeights &&    
@@ -1366,7 +1410,7 @@ private static void BuildMesh(
 
     bool skinWeightsApplied = false;    
 
-    if (skinDataReady)    
+    if (skinDataReady && !forceStaticMeshTest)    
     {    
         try    
         {    
@@ -1451,7 +1495,7 @@ private static void BuildMesh(
             new Il2CppReferenceArray<Material>(    
                 submeshMaterials.ToArray());    
 
-        if (skinned && skinDataReady)    
+        if (skinned && skinDataReady && !forceStaticMeshTest)    
         {    
             RegisterCpuSkinning(    
                 modelRoot,    
@@ -1466,7 +1510,7 @@ private static void BuildMesh(
                 bonesPerVertex,    
                 allBoneWeights);    
         }    
-        else if (skinned)    
+        else if (skinned && !forceStaticMeshTest)    
         {    
             LogError(    
                 "CPU skinning unavailable because valid " +    
