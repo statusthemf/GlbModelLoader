@@ -190,6 +190,27 @@ public static GameObject LoadGLB(
         Transform[] nodeTransforms =
             BuildScene(doc, root.transform, materials, options);
 
+        for (int i = 0; i < nodeTransforms.Length; i++)
+        {
+            Transform node = nodeTransforms[i];
+
+            if (node == null)
+                continue;
+
+            if (node.name.IndexOf(
+                "Skinned Mesh",
+                StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                DiagnosticLog.LogInfo(
+                    "[ULTRADROID Models] Mesh node '" + node.name +
+                    "': localPosition=" + node.localPosition +
+                    ", worldPosition=" + node.position +
+                    ", localScale=" + node.localScale +
+                    ", parent=" +
+                    (node.parent != null ? node.parent.name : "none"));
+            }
+        }
+
         // Run diagnostics after BuildScene creates the mesh objects.
         Renderer[] renderers =
             root.GetComponentsInChildren<Renderer>(true);
@@ -353,10 +374,16 @@ private static Material[] BuildMaterials(
         if (source == null)    
             continue;    
 
-        Material material = new Material(shader);    
+                Material material = new Material(shader);
 
-        material.name = string.IsNullOrEmpty(source.name)    
-            ? "GLTF_Material_" + i    
+        DiagnosticLog.LogInfo(
+            "[ULTRADROID Models] Material '" + material.name +
+            "' shader='" + material.shader.name +
+            "', passCount=" + material.passCount +
+            ", renderQueue=" + material.renderQueue);
+
+        material.name = string.IsNullOrEmpty(source.name)
+            ? "GLTF_Material_" + i
             : source.name;    
 
         PbrMetallicRoughness pbr =    
